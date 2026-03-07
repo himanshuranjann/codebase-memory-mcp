@@ -1,11 +1,24 @@
+# Task 12: GitHub Pages Landing Page
+
+Create at `deusdata.github.io/codebase-memory-mcp`
+
+## Setup
+
+1. Create a `docs/` directory in the repo
+2. Add an `index.html` with proper SEO meta tags
+3. Enable GitHub Pages in repo settings (source: `docs/` from `main` branch)
+
+## index.html
+
+```html
 <!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>codebase-memory-mcp — Code Knowledge Graph for AI Assistants</title>
-    <meta name="description" content="MCP server that indexes codebases into a persistent knowledge graph. 63 languages, 120x fewer tokens, single Go binary. Works with Claude Code, Codex CLI, Cursor, Windsurf, Gemini CLI, VS Code, Zed.">
-    <meta name="keywords" content="MCP server, code analysis, knowledge graph, tree-sitter, Claude Code, Codex, Cursor, Windsurf, Gemini CLI, VS Code, Zed, developer tools, code exploration, token reduction">
+    <meta name="description" content="MCP server that indexes codebases into a persistent knowledge graph. 63 languages, 120x fewer tokens, single Go binary. Works with Claude Code, Codex CLI, Cursor, Windsurf.">
+    <meta name="keywords" content="MCP server, code analysis, knowledge graph, tree-sitter, Claude Code, Codex, Cursor, Windsurf, developer tools, code exploration, token reduction">
 
     <!-- Open Graph -->
     <meta property="og:title" content="codebase-memory-mcp — Code Knowledge Graph for AI Assistants">
@@ -240,7 +253,7 @@
             <span class="cmd">"Index this project"</span>
         </div>
         <p style="color: var(--text-secondary); font-size: 0.9rem;">
-            Works with Claude Code, Codex CLI, Cursor, Windsurf, Gemini CLI, VS Code, and Zed. Also has a CLI mode for direct terminal use.
+            Works with Claude Code, Codex CLI, Cursor, and Windsurf. Also has a CLI mode for direct terminal use.
         </p>
     </section>
 
@@ -312,8 +325,8 @@
             </tbody>
         </table>
         <p style="color: var(--text-secondary); font-size: 0.875rem; margin-top: 8px;">
-            Tested across 31 languages with agent-vs-agent methodology (372 questions).
-            MCP achieves 90% of Explorer quality at 20-100x lower per-query cost.
+            Tested across 63 real open-source repos (78 to 49K nodes). Stress tested on Linux kernel
+            (20K nodes, 67K edges, zero timeouts).
             <a href="https://github.com/DeusData/codebase-memory-mcp/blob/main/BENCHMARK_REPORT.md">Full benchmark report &rarr;</a>
         </p>
     </section>
@@ -323,7 +336,7 @@
         <div class="features">
             <div class="feature">
                 <h3>63 Languages</h3>
-                <p>Python, Go, JS, TS, TSX, Rust, Java, C++, C#, C, PHP, Ruby, Kotlin, Scala, Zig, Elixir, Haskell, OCaml, Swift, Dart, MATLAB, Lean 4, and 41 more via vendored tree-sitter grammars.</p>
+                <p>Python, Go, JS, TS, Rust, Java, C++, C#, PHP, Ruby, Kotlin, Scala, Zig, Elixir, Haskell, and 20 more via tree-sitter grammars.</p>
             </div>
             <div class="feature">
                 <h3>Call Graph Tracing</h3>
@@ -375,7 +388,7 @@
                 <tr><td>Runtime</td><td class="win">Single Go binary</td><td>Node.js (npx)</td></tr>
                 <tr><td>Runtime dependency</td><td class="win">None</td><td>Node.js</td></tr>
                 <tr><td>Embedded LLM</td><td class="win">No (uses your MCP client)</td><td>Yes (extra API key + cost)</td></tr>
-                <tr><td>Published benchmarks</td><td class="win">Yes (31 langs, 372 questions)</td><td>No</td></tr>
+                <tr><td>Published benchmarks</td><td class="win">Yes (63 repos, Linux kernel)</td><td>No</td></tr>
                 <tr><td>Auto-sync</td><td class="win">Yes</td><td>No</td></tr>
                 <tr><td>MCP tools</td><td class="win">12</td><td>7</td></tr>
                 <tr><td>Cross-service HTTP linking</td><td class="win">Yes</td><td>No</td></tr>
@@ -404,3 +417,19 @@
 
 </body>
 </html>
+```
+
+## Setup Instructions
+
+1. Create `docs/` directory in the repo root
+2. Save the HTML above as `docs/index.html`
+3. Go to GitHub repo Settings > Pages
+4. Source: Deploy from branch, Branch: `main`, Folder: `/docs`
+5. Save — site will be live at `deusdata.github.io/codebase-memory-mcp` within minutes
+
+## SEO Targets
+- "MCP server code analysis"
+- "reduce AI token usage codebase"
+- "code knowledge graph"
+- "tree-sitter code analysis"
+- "Claude Code MCP server"
