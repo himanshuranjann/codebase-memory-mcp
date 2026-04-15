@@ -15,9 +15,15 @@ import (
 type fakeBackend struct {
 	response json.RawMessage
 	err      error
+	method   string
+	params   json.RawMessage
+	calls    int
 }
 
 func (f *fakeBackend) Call(method string, params json.RawMessage) (json.RawMessage, error) {
+	f.method = method
+	f.params = append(json.RawMessage(nil), params...)
+	f.calls++
 	return f.response, f.err
 }
 
@@ -66,6 +72,9 @@ func TestBridge_ForwardsToolCall(t *testing.T) {
 	}
 	if resp["result"] == nil {
 		t.Error("result: want non-nil")
+	}
+	if backend.method != "tools/call" {
+		t.Errorf("method: want tools/call, got %q", backend.method)
 	}
 }
 
@@ -146,6 +155,9 @@ func TestBridge_MethodNotAllowed(t *testing.T) {
 	if rr.Code != http.StatusMethodNotAllowed {
 		t.Errorf("status: want 405 for GET, got %d", rr.Code)
 	}
+	if got := rr.Header().Get("Allow"); got != http.MethodPost {
+		t.Errorf("Allow: want POST, got %q", got)
+	}
 }
 
 func TestBridge_HealthEndpoint(t *testing.T) {
@@ -175,5 +187,47 @@ func TestBridge_PreservesRequestID(t *testing.T) {
 	json.Unmarshal(rr.Body.Bytes(), &resp)
 	if resp["id"] != "req-42" {
 		t.Errorf("id: want req-42, got %v", resp["id"])
+	}
+}
+
+func TestBridge_NotificationAcceptedWithoutResponse(t *testing.T) {
+	backend := &fakeBackend{response: json.RawMessage(`{}`)}
+	h := bridge.NewHandler(backend, bridge.Config{})
+
+	body := []byte(`{"jsonrpc":"2.0","method":"notifications/initialized"}`)
+	req := httptest.NewRequest(http.MethodPost, "/mcp", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rr := httptest.NewRecorder()
+	h.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusAccepted {
+		t.Errorf("status: want 202 for notification, got %d", rr.Code)
+	}
+	if rr.Body.Len() != 0 {
+		t.Errorf("body: want empty notification response, got %q", rr.Body.String())
+	}
+	if backend.calls != 0 {
+		t.Errorf("backend calls: want 0, got %d", backend.calls)
+	}
+}
+
+func TestBridge_ReturnsMethodNotFound(t *testing.T) {
+	backend := &fakeBackend{err: bridge.ErrMethodNotFound}
+	h := bridge.NewHandler(backend, bridge.Config{})
+
+	body := mcpRequest(t, 9, "unknown/method", nil)
+	req := httptest.NewRequest(http.MethodPost, "/mcp", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rr := httptest.NewRecorder()
+	h.ServeHTTP(rr, req)
+
+	var resp map[string]interface{}
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("parse response: %v", err)
+	}
+
+	errObj, _ := resp["error"].(map[string]interface{})
+	if code := int(errObj["code"].(float64)); code != -32601 {
+		t.Errorf("error code: want -32601, got %d", code)
 	}
 }

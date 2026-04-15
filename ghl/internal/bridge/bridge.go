@@ -13,6 +13,9 @@ import (
 // ErrBackendUnavailable is returned when the underlying MCP binary is not ready.
 var ErrBackendUnavailable = errors.New("bridge: backend unavailable")
 
+// ErrMethodNotFound is returned when the bridge backend does not implement an MCP method.
+var ErrMethodNotFound = errors.New("bridge: method not found")
+
 // Backend is the interface to the underlying MCP binary.
 type Backend interface {
 	// Call forwards a JSON-RPC method + params and returns the raw result or error.
@@ -26,7 +29,7 @@ type Config struct {
 	BearerToken string
 }
 
-// Handler is an http.Handler that bridges HTTP POST requests to the MCP backend.
+// Handler is an http.Handler that bridges HTTP JSON-RPC requests to the MCP backend.
 type Handler struct {
 	backend Backend
 	cfg     Config
@@ -48,7 +51,7 @@ type jsonrpcRequest struct {
 // ServeHTTP routes requests:
 //
 //	GET  /health  — liveness check, no auth required
-//	POST /mcp     — JSON-RPC forwarding, auth required if BearerToken is set
+//	POST /mcp     — Streamable HTTP JSON-RPC, auth required if BearerToken is set
 func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if r.URL.Path == "/health" {
 		w.Header().Set("Content-Type", "application/json")
@@ -57,7 +60,14 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if r.Method == http.MethodGet {
+		w.Header().Set("Allow", http.MethodPost)
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
 	if r.Method != http.MethodPost {
+		w.Header().Set("Allow", http.MethodPost)
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
@@ -83,18 +93,40 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-
-	result, backendErr := h.backend.Call(req.Method, req.Params)
-	if backendErr != nil {
-		writeError(w, req.ID, -32603, "backend error: "+backendErr.Error())
+	if req.JSONRPC != "" && req.JSONRPC != "2.0" {
+		w.Header().Set("Content-Type", "application/json")
+		writeError(w, req.ID, -32600, "invalid request: jsonrpc must be 2.0")
 		return
 	}
 
-	resp := map[string]interface{}{
-		"jsonrpc": "2.0",
-		"id":      req.ID,
-		"result":  result,
+	// MCP notifications do not expect a JSON-RPC response body.
+	if req.ID == nil && strings.HasPrefix(req.Method, "notifications/") {
+		w.WriteHeader(http.StatusAccepted)
+		return
+	}
+
+	result, backendErr := h.backend.Call(req.Method, req.Params)
+	if backendErr != nil {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case errors.Is(backendErr, ErrMethodNotFound):
+			writeError(w, req.ID, -32601, backendErr.Error())
+		default:
+			writeError(w, req.ID, -32603, "backend error: "+backendErr.Error())
+		}
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+
+	resp := struct {
+		JSONRPC string          `json:"jsonrpc"`
+		ID      interface{}     `json:"id"`
+		Result  json.RawMessage `json:"result"`
+	}{
+		JSONRPC: "2.0",
+		ID:      req.ID,
+		Result:  result,
 	}
 	w.WriteHeader(http.StatusOK)
 	_ = json.NewEncoder(w).Encode(resp)

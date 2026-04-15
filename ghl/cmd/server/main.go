@@ -9,6 +9,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -30,6 +31,13 @@ import (
 	"github.com/GoHighLevel/codebase-memory-mcp/ghl/internal/mcp"
 	"github.com/GoHighLevel/codebase-memory-mcp/ghl/internal/webhook"
 )
+
+var supportedProtocolVersions = []string{
+	"2025-11-25",
+	"2025-06-18",
+	"2025-03-26",
+	"2024-11-05",
+}
 
 func main() {
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo}))
@@ -310,30 +318,87 @@ func (m *mcpIndexClient) IndexRepository(ctx context.Context, repoPath, mode str
 	return nil
 }
 
+type bridgeClient interface {
+	ServerInfo() mcp.ServerInfo
+	Call(ctx context.Context, method string, params interface{}) (json.RawMessage, error)
+	CallTool(ctx context.Context, name string, params map[string]interface{}) (*mcp.ToolResult, error)
+}
+
 // mcpBridgeBackend implements bridge.Backend by forwarding to the MCP client.
 type mcpBridgeBackend struct {
-	client *mcp.Client
+	client bridgeClient
 }
 
 func (b *mcpBridgeBackend) Call(method string, params json.RawMessage) (json.RawMessage, error) {
 	if b.client == nil {
 		return nil, bridge.ErrBackendUnavailable
 	}
-	var paramMap map[string]interface{}
+
+	switch method {
+	case "initialize":
+		return b.initialize(params)
+	case "ping":
+		return json.RawMessage(`{}`), nil
+	case "tools/list":
+		raw, err := b.client.Call(context.Background(), "tools/list", nil)
+		if err != nil {
+			return nil, err
+		}
+		return raw, nil
+	case "tools/call":
+		var paramMap map[string]interface{}
+		if len(params) > 0 {
+			if err := json.Unmarshal(params, &paramMap); err != nil {
+				return nil, fmt.Errorf("parse params: %w", err)
+			}
+		}
+
+		name, _ := paramMap["name"].(string)
+		if name == "" {
+			return nil, errors.New("missing tool name")
+		}
+		args, _ := paramMap["arguments"].(map[string]interface{})
+
+		result, err := b.client.CallTool(context.Background(), name, args)
+		if err != nil {
+			return nil, err
+		}
+
+		return json.Marshal(result)
+	default:
+		return nil, bridge.ErrMethodNotFound
+	}
+}
+
+func (b *mcpBridgeBackend) initialize(params json.RawMessage) (json.RawMessage, error) {
+	type initializeParams struct {
+		ProtocolVersion string `json:"protocolVersion"`
+	}
+	type initializeResult struct {
+		ProtocolVersion string                 `json:"protocolVersion"`
+		Capabilities    map[string]interface{} `json:"capabilities"`
+		ServerInfo      mcp.ServerInfo         `json:"serverInfo"`
+	}
+
+	version := supportedProtocolVersions[0]
 	if len(params) > 0 {
-		if err := json.Unmarshal(params, &paramMap); err != nil {
-			return nil, fmt.Errorf("parse params: %w", err)
+		var p initializeParams
+		if err := json.Unmarshal(params, &p); err != nil {
+			return nil, fmt.Errorf("parse initialize params: %w", err)
+		}
+		for _, supported := range supportedProtocolVersions {
+			if p.ProtocolVersion == supported {
+				version = supported
+				break
+			}
 		}
 	}
 
-	// Extract tool name and arguments from tools/call params
-	name, _ := paramMap["name"].(string)
-	args, _ := paramMap["arguments"].(map[string]interface{})
-
-	result, err := b.client.CallTool(context.Background(), name, args)
-	if err != nil {
-		return nil, err
-	}
-
-	return json.Marshal(result)
+	return json.Marshal(initializeResult{
+		ProtocolVersion: version,
+		Capabilities: map[string]interface{}{
+			"tools": map[string]interface{}{},
+		},
+		ServerInfo: b.client.ServerInfo(),
+	})
 }

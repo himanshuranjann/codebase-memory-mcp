@@ -15,8 +15,8 @@ import (
 
 // ServerInfo holds identifying information returned during initialization.
 type ServerInfo struct {
-	Name    string
-	Version string
+	Name    string `json:"name"`
+	Version string `json:"version"`
 }
 
 // Content is a single item returned in a tool result.
@@ -27,8 +27,8 @@ type Content struct {
 
 // ToolResult is the parsed result of a tools/call response.
 type ToolResult struct {
-	Content []Content
-	IsError bool
+	Content []Content `json:"content"`
+	IsError bool      `json:"isError"`
 }
 
 // Client manages a single subprocess running codebase-memory-mcp and serializes
@@ -118,13 +118,18 @@ func (c *Client) ServerInfo() ServerInfo {
 	return c.info
 }
 
-// CallTool sends a tools/call request and returns the parsed result.
+// Call sends an arbitrary MCP request and returns the raw result payload.
 // It is safe to call from multiple goroutines — requests are serialized.
-func (c *Client) CallTool(ctx context.Context, name string, params map[string]interface{}) (*ToolResult, error) {
+func (c *Client) Call(ctx context.Context, method string, params interface{}) (json.RawMessage, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
+	return c.roundtrip(ctx, method, params)
+}
 
+// CallTool sends a tools/call request and returns the parsed result.
+// It is safe to call from multiple goroutines — requests are serialized.
+func (c *Client) CallTool(ctx context.Context, name string, params map[string]interface{}) (*ToolResult, error) {
 	toolParams := map[string]interface{}{
 		"name": name,
 	}
@@ -132,7 +137,7 @@ func (c *Client) CallTool(ctx context.Context, name string, params map[string]in
 		toolParams["arguments"] = params
 	}
 
-	raw, err := c.roundtrip(ctx, "tools/call", toolParams)
+	raw, err := c.Call(ctx, "tools/call", toolParams)
 	if err != nil {
 		return nil, err
 	}
@@ -163,7 +168,7 @@ func (c *Client) Close() {
 
 func (c *Client) initialize(ctx context.Context) error {
 	initParams := map[string]interface{}{
-		"protocolVersion": "2024-11-05",
+		"protocolVersion": "2025-11-25",
 		"capabilities":    map[string]interface{}{},
 		"clientInfo":      map[string]interface{}{"name": "ghl-fleet", "version": "1.0.0"},
 	}
