@@ -20,6 +20,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -497,6 +498,8 @@ var newIndexToolClient = func(ctx context.Context, binPath string) (indexToolCli
 }
 
 type mcpToolClientPool struct {
+	binPath string
+	mu      sync.Mutex
 	clients chan indexToolClient
 	all     []indexToolClient
 }
@@ -506,6 +509,7 @@ func newMCPToolClientPool(ctx context.Context, binPath string, size int) (*mcpTo
 		size = 1
 	}
 	pool := &mcpToolClientPool{
+		binPath: binPath,
 		clients: make(chan indexToolClient, size),
 		all:     make([]indexToolClient, 0, size),
 	}
@@ -548,8 +552,51 @@ func (p *mcpToolClientPool) CallTool(ctx context.Context, name string, params ma
 	if err != nil {
 		return nil, err
 	}
-	defer p.release(client)
-	return client.CallTool(ctx, name, params)
+
+	type toolCallResult struct {
+		result *mcp.ToolResult
+		err    error
+	}
+
+	resultCh := make(chan toolCallResult, 1)
+	go func() {
+		result, err := client.CallTool(ctx, name, params)
+		resultCh <- toolCallResult{result: result, err: err}
+	}()
+
+	select {
+	case out := <-resultCh:
+		p.release(client)
+		return out.result, out.err
+	case <-ctx.Done():
+		client.Close()
+		if err := p.replaceClient(client); err != nil {
+			return nil, fmt.Errorf("%w (and failed to replace timed out MCP client: %v)", ctx.Err(), err)
+		}
+		return nil, ctx.Err()
+	}
+}
+
+func (p *mcpToolClientPool) replaceClient(dead indexToolClient) error {
+	replacementCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	replacement, err := newIndexToolClient(replacementCtx, p.binPath)
+	if err != nil {
+		return err
+	}
+
+	p.mu.Lock()
+	for i, client := range p.all {
+		if client == dead {
+			p.all[i] = replacement
+			break
+		}
+	}
+	p.mu.Unlock()
+
+	p.release(replacement)
+	return nil
 }
 
 type mcpIndexClientPool struct {

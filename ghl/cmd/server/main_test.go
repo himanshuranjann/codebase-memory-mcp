@@ -6,6 +6,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -272,6 +273,48 @@ func (f *fakeIndexToolClient) CallTool(ctx context.Context, name string, params 
 
 func (f *fakeIndexToolClient) Close() {}
 
+type blockingToolClient struct {
+	started chan struct{}
+	closed  chan struct{}
+	once    sync.Once
+}
+
+func newBlockingToolClient() *blockingToolClient {
+	return &blockingToolClient{
+		started: make(chan struct{}),
+		closed:  make(chan struct{}),
+	}
+}
+
+func (f *blockingToolClient) CallTool(ctx context.Context, name string, params map[string]interface{}) (*mcp.ToolResult, error) {
+	close(f.started)
+	select {
+	case <-f.closed:
+		return nil, context.DeadlineExceeded
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+}
+
+func (f *blockingToolClient) Close() {
+	f.once.Do(func() {
+		close(f.closed)
+	})
+}
+
+type fastToolClient struct {
+	result *mcp.ToolResult
+}
+
+func (f *fastToolClient) CallTool(ctx context.Context, name string, params map[string]interface{}) (*mcp.ToolResult, error) {
+	if f.result != nil {
+		return f.result, nil
+	}
+	return &mcp.ToolResult{}, nil
+}
+
+func (f *fastToolClient) Close() {}
+
 func TestMCPIndexClientPoolRunsConcurrentIndexing(t *testing.T) {
 	var inFlight atomic.Int64
 	var maxFlight atomic.Int64
@@ -338,6 +381,62 @@ func TestMCPIndexClientPoolPropagatesToolErrors(t *testing.T) {
 	}
 	if got := err.Error(); got != "index_repository: bad repo" {
 		t.Fatalf("unexpected error: %s", got)
+	}
+}
+
+func TestMCPToolClientPoolReplacesTimedOutClient(t *testing.T) {
+	blocking := newBlockingToolClient()
+	replacement := &fastToolClient{
+		result: &mcp.ToolResult{Content: []mcp.Content{{Type: "text", Text: "ok"}}},
+	}
+
+	var factoryCalls atomic.Int64
+	prevFactory := newIndexToolClient
+	newIndexToolClient = func(ctx context.Context, binPath string) (indexToolClient, error) {
+		switch factoryCalls.Add(1) {
+		case 1:
+			return blocking, nil
+		case 2:
+			return replacement, nil
+		default:
+			return &fastToolClient{
+				result: &mcp.ToolResult{Content: []mcp.Content{{Type: "text", Text: "ok"}}},
+			}, nil
+		}
+	}
+	defer func() { newIndexToolClient = prevFactory }()
+
+	pool, err := newMCPToolClientPool(context.Background(), "/tmp/cbm", 1)
+	if err != nil {
+		t.Fatalf("newMCPToolClientPool: %v", err)
+	}
+	defer pool.Close()
+
+	select {
+	case <-blocking.started:
+	default:
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
+	defer cancel()
+	start := time.Now()
+	_, err = pool.CallTool(ctx, "search_graph", map[string]interface{}{"project": "demo"})
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("expected context deadline exceeded, got %v", err)
+	}
+	if elapsed := time.Since(start); elapsed > 500*time.Millisecond {
+		t.Fatalf("timed out call returned too slowly: %s", elapsed)
+	}
+
+	result, err := pool.CallTool(context.Background(), "search_graph", map[string]interface{}{"project": "demo"})
+	if err != nil {
+		t.Fatalf("replacement client call failed: %v", err)
+	}
+	if len(result.Content) != 1 || result.Content[0].Text != "ok" {
+		t.Fatalf("unexpected replacement result: %+v", result)
+	}
+	if got := factoryCalls.Load(); got < 2 {
+		t.Fatalf("expected replacement factory call, got %d", got)
 	}
 }
 
