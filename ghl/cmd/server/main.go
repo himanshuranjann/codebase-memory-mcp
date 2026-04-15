@@ -28,6 +28,7 @@ import (
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/robfig/cron/v3"
 
+	ghlauth "github.com/GoHighLevel/codebase-memory-mcp/ghl/internal/auth"
 	"github.com/GoHighLevel/codebase-memory-mcp/ghl/internal/bridge"
 	"github.com/GoHighLevel/codebase-memory-mcp/ghl/internal/discovery"
 	"github.com/GoHighLevel/codebase-memory-mcp/ghl/internal/indexer"
@@ -86,6 +87,16 @@ func main() {
 	}
 	defer discoveryPool.Close()
 	slog.Info("discovery client pool started", "clients", cfg.DiscoveryClients)
+
+	var requestAuthenticator bridge.Authenticator
+	if cfg.GitHubAuthEnabled {
+		requestAuthenticator = ghlauth.NewGitHubAuthenticator(ghlauth.GitHubConfig{
+			BaseURL:     cfg.GitHubAPIBaseURL,
+			AllowedOrgs: cfg.GitHubAllowedOrgs,
+			CacheTTL:    cfg.GitHubAuthCacheTTL,
+		})
+		slog.Info("github bearer auth enabled", "allowed_orgs", cfg.GitHubAllowedOrgs)
+	}
 
 	// ── Build indexer ────────────────────────────────────────
 
@@ -152,10 +163,12 @@ func main() {
 	// Bridge: forward MCP calls to the binary
 	bridgeHandler := bridge.NewHandler(
 		&mcpBridgeBackend{client: mcpClient, discovery: discoverySvc},
-		bridge.Config{BearerToken: cfg.BearerToken},
+		bridge.Config{BearerToken: cfg.BearerToken, Authenticator: requestAuthenticator},
 	)
 	r.Mount("/mcp", bridgeHandler)
 	r.Get("/health", bridgeHandler.ServeHTTP)
+
+	requireAuth := makeAuthMiddleware(cfg.BearerToken, requestAuthenticator)
 
 	// Webhook: trigger re-index on GitHub push
 	wh := webhook.NewHandler(webhook.Config{
@@ -175,7 +188,7 @@ func main() {
 	r.Post("/webhooks/github", wh.ServeHTTP)
 
 	// Manual trigger: index a single repo by slug
-	r.Post("/index/{repoSlug}", func(w http.ResponseWriter, req *http.Request) {
+	r.Post("/index/{repoSlug}", requireAuth(func(w http.ResponseWriter, req *http.Request) {
 		slug := chi.URLParam(req, "repoSlug")
 		repo, ok := m.FindByName(slug)
 		if !ok {
@@ -189,10 +202,10 @@ func main() {
 		}()
 		w.WriteHeader(http.StatusAccepted)
 		fmt.Fprintf(w, `{"accepted":true,"repo":%q}`, slug)
-	})
+	}))
 
 	// Fleet status endpoint
-	r.Get("/status", func(w http.ResponseWriter, req *http.Request) {
+	r.Get("/status", requireAuth(func(w http.ResponseWriter, req *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(map[string]interface{}{
 			"repos":                    len(m.Repos),
@@ -205,8 +218,9 @@ func main() {
 			"discovery_clients":        cfg.DiscoveryClients,
 			"discovery_max_candidates": cfg.DiscoveryMaxCandidates,
 			"discovery_timeout_ms":     cfg.DiscoveryTimeout.Milliseconds(),
+			"github_auth_enabled":      cfg.GitHubAuthEnabled,
 		})
-	})
+	}))
 
 	srv := &http.Server{
 		Addr:         ":" + cfg.Port,
@@ -245,6 +259,30 @@ func main() {
 	}
 }
 
+func makeAuthMiddleware(staticToken string, auth bridge.Authenticator) func(http.HandlerFunc) http.HandlerFunc {
+	return func(next http.HandlerFunc) http.HandlerFunc {
+		return func(w http.ResponseWriter, req *http.Request) {
+			authHeader := req.Header.Get("Authorization")
+			if auth != nil {
+				if !strings.HasPrefix(authHeader, "Bearer ") {
+					http.Error(w, "unauthorized", http.StatusUnauthorized)
+					return
+				}
+				if err := auth.Authenticate(req.Context(), strings.TrimPrefix(authHeader, "Bearer ")); err != nil {
+					http.Error(w, "unauthorized", http.StatusUnauthorized)
+					return
+				}
+			} else if staticToken != "" {
+				if !strings.HasPrefix(authHeader, "Bearer ") || strings.TrimPrefix(authHeader, "Bearer ") != staticToken {
+					http.Error(w, "unauthorized", http.StatusUnauthorized)
+					return
+				}
+			}
+			next(w, req)
+		}
+	}
+}
+
 // ── Config ─────────────────────────────────────────────────────
 
 type config struct {
@@ -254,6 +292,10 @@ type config struct {
 	ReposManifest          string
 	BearerToken            string
 	GitHubToken            string
+	GitHubAuthEnabled      bool
+	GitHubAllowedOrgs      []string
+	GitHubAPIBaseURL       string
+	GitHubAuthCacheTTL     time.Duration
 	WebhookSecret          string
 	Concurrency            int
 	IndexerClients         int
@@ -270,6 +312,35 @@ func loadConfig() config {
 			return v
 		}
 		return def
+	}
+	getBool := func(key string, def bool) bool {
+		v := strings.TrimSpace(getEnv(key, ""))
+		if v == "" {
+			return def
+		}
+		switch strings.ToLower(v) {
+		case "1", "true", "yes", "on":
+			return true
+		case "0", "false", "no", "off":
+			return false
+		default:
+			return def
+		}
+	}
+	getStringList := func(key string) []string {
+		raw := strings.TrimSpace(getEnv(key, ""))
+		if raw == "" {
+			return nil
+		}
+		parts := strings.Split(raw, ",")
+		out := make([]string, 0, len(parts))
+		for _, part := range parts {
+			part = strings.TrimSpace(part)
+			if part != "" {
+				out = append(out, part)
+			}
+		}
+		return out
 	}
 	getConcurrency := func() int {
 		v := getEnv("FLEET_CONCURRENCY", "5")
@@ -325,6 +396,15 @@ func loadConfig() config {
 		}
 		return time.Duration(n) * time.Millisecond
 	}
+	getGitHubAuthCacheTTL := func() time.Duration {
+		v := getEnv("GITHUB_AUTH_CACHE_TTL_MS", "300000")
+		n := 300000
+		fmt.Sscanf(v, "%d", &n)
+		if n <= 0 {
+			return 5 * time.Minute
+		}
+		return time.Duration(n) * time.Millisecond
+	}
 	concurrency := getConcurrency()
 	return config{
 		Port:                   getEnv("PORT", "8080"),
@@ -333,6 +413,10 @@ func loadConfig() config {
 		ReposManifest:          getEnv("REPOS_MANIFEST", defaultManifestPath()),
 		BearerToken:            getEnv("BEARER_TOKEN", ""),
 		GitHubToken:            getEnv("GITHUB_TOKEN", ""),
+		GitHubAuthEnabled:      getBool("GITHUB_AUTH_ENABLED", false),
+		GitHubAllowedOrgs:      getStringList("GITHUB_ALLOWED_ORGS"),
+		GitHubAPIBaseURL:       getEnv("GITHUB_API_BASE_URL", "https://api.github.com"),
+		GitHubAuthCacheTTL:     getGitHubAuthCacheTTL(),
 		WebhookSecret:          getEnv("GITHUB_WEBHOOK_SECRET", ""),
 		Concurrency:            concurrency,
 		IndexerClients:         getIndexerClients(concurrency),

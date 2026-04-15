@@ -2,6 +2,7 @@ package bridge_test
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -40,6 +41,19 @@ func mcpRequest(t *testing.T, id interface{}, method string, params interface{})
 	}
 	b, _ := json.Marshal(req)
 	return b
+}
+
+type fakeAuthenticator struct {
+	token string
+	calls int
+}
+
+func (f *fakeAuthenticator) Authenticate(_ context.Context, bearerToken string) error {
+	f.calls++
+	if bearerToken != f.token {
+		return bridge.ErrBackendUnavailable
+	}
+	return nil
 }
 
 // ── Tests ──────────────────────────────────────────────────────
@@ -127,6 +141,53 @@ func TestBridge_RequiresAuthToken(t *testing.T) {
 
 	if rr2.Code != http.StatusOK {
 		t.Errorf("status: want 200 with correct token, got %d", rr2.Code)
+	}
+}
+
+func TestBridge_UsesAuthenticatorWhenConfigured(t *testing.T) {
+	backend := &fakeBackend{response: json.RawMessage(`{}`)}
+	auth := &fakeAuthenticator{token: "ghp-valid"}
+	h := bridge.NewHandler(backend, bridge.Config{
+		BearerToken:   "legacy-token",
+		Authenticator: auth,
+	})
+
+	body := mcpRequest(t, 4, "tools/call", nil)
+
+	req := httptest.NewRequest(http.MethodPost, "/mcp", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer ghp-valid")
+	rr := httptest.NewRecorder()
+	h.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status: want 200 with valid authenticator token, got %d", rr.Code)
+	}
+	if auth.calls != 1 {
+		t.Fatalf("auth calls: want 1, got %d", auth.calls)
+	}
+}
+
+func TestBridge_RejectsInvalidAuthenticatorToken(t *testing.T) {
+	backend := &fakeBackend{response: json.RawMessage(`{}`)}
+	auth := &fakeAuthenticator{token: "ghp-valid"}
+	h := bridge.NewHandler(backend, bridge.Config{
+		Authenticator: auth,
+	})
+
+	body := mcpRequest(t, 5, "tools/call", nil)
+
+	req := httptest.NewRequest(http.MethodPost, "/mcp", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer ghp-invalid")
+	rr := httptest.NewRecorder()
+	h.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusUnauthorized {
+		t.Fatalf("status: want 401 with invalid authenticator token, got %d", rr.Code)
+	}
+	if auth.calls != 1 {
+		t.Fatalf("auth calls: want 1, got %d", auth.calls)
 	}
 }
 

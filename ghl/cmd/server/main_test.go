@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"sync"
@@ -15,6 +17,19 @@ import (
 	"github.com/GoHighLevel/codebase-memory-mcp/ghl/internal/discovery"
 	"github.com/GoHighLevel/codebase-memory-mcp/ghl/internal/mcp"
 )
+
+type fakeRequestAuthenticator struct {
+	token string
+	calls int
+}
+
+func (f *fakeRequestAuthenticator) Authenticate(_ context.Context, bearerToken string) error {
+	f.calls++
+	if bearerToken != f.token {
+		return errors.New("unauthorized")
+	}
+	return nil
+}
 
 type fakeBridgeClient struct {
 	info       mcp.ServerInfo
@@ -231,6 +246,59 @@ func TestMCPBridgeBackendRejectsUnknownMethod(t *testing.T) {
 	}
 	if err != bridge.ErrMethodNotFound {
 		t.Fatalf("want ErrMethodNotFound, got %v", err)
+	}
+}
+
+func TestMakeAuthMiddlewareUsesAuthenticatorWhenConfigured(t *testing.T) {
+	auth := &fakeRequestAuthenticator{token: "ghp-valid"}
+	handler := makeAuthMiddleware("legacy-token", auth)(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusAccepted)
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/status", nil)
+	req.Header.Set("Authorization", "Bearer ghp-valid")
+	rr := httptest.NewRecorder()
+	handler(rr, req)
+
+	if rr.Code != http.StatusAccepted {
+		t.Fatalf("status: want %d, got %d", http.StatusAccepted, rr.Code)
+	}
+	if auth.calls != 1 {
+		t.Fatalf("auth calls: want 1, got %d", auth.calls)
+	}
+}
+
+func TestMakeAuthMiddlewareRejectsLegacyBearerWhenAuthenticatorConfigured(t *testing.T) {
+	auth := &fakeRequestAuthenticator{token: "ghp-valid"}
+	handler := makeAuthMiddleware("legacy-token", auth)(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusAccepted)
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/status", nil)
+	req.Header.Set("Authorization", "Bearer legacy-token")
+	rr := httptest.NewRecorder()
+	handler(rr, req)
+
+	if rr.Code != http.StatusUnauthorized {
+		t.Fatalf("status: want %d, got %d", http.StatusUnauthorized, rr.Code)
+	}
+	if auth.calls != 1 {
+		t.Fatalf("auth calls: want 1, got %d", auth.calls)
+	}
+}
+
+func TestMakeAuthMiddlewareFallsBackToStaticBearerToken(t *testing.T) {
+	handler := makeAuthMiddleware("legacy-token", nil)(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusAccepted)
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/status", nil)
+	req.Header.Set("Authorization", "Bearer legacy-token")
+	rr := httptest.NewRecorder()
+	handler(rr, req)
+
+	if rr.Code != http.StatusAccepted {
+		t.Fatalf("status: want %d, got %d", http.StatusAccepted, rr.Code)
 	}
 }
 

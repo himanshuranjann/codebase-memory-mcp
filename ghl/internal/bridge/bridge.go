@@ -3,6 +3,7 @@
 package bridge
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"io"
@@ -27,6 +28,14 @@ type Config struct {
 	// BearerToken, if non-empty, requires all /mcp requests to carry
 	// "Authorization: Bearer <token>".
 	BearerToken string
+	// Authenticator, if non-nil, validates bearer tokens dynamically.
+	// When set, it takes precedence over BearerToken.
+	Authenticator Authenticator
+}
+
+// Authenticator validates bearer tokens for HTTP requests.
+type Authenticator interface {
+	Authenticate(ctx context.Context, bearerToken string) error
 }
 
 // Handler is an http.Handler that bridges HTTP JSON-RPC requests to the MCP backend.
@@ -73,7 +82,17 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Auth check
-	if h.cfg.BearerToken != "" {
+	if h.cfg.Authenticator != nil {
+		auth := r.Header.Get("Authorization")
+		if !strings.HasPrefix(auth, "Bearer ") {
+			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			return
+		}
+		if err := h.cfg.Authenticator.Authenticate(r.Context(), strings.TrimPrefix(auth, "Bearer ")); err != nil {
+			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			return
+		}
+	} else if h.cfg.BearerToken != "" {
 		auth := r.Header.Get("Authorization")
 		if !strings.HasPrefix(auth, "Bearer ") || strings.TrimPrefix(auth, "Bearer ") != h.cfg.BearerToken {
 			http.Error(w, "unauthorized", http.StatusUnauthorized)
