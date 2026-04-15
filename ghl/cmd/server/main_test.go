@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/GoHighLevel/codebase-memory-mcp/ghl/internal/bridge"
+	"github.com/GoHighLevel/codebase-memory-mcp/ghl/internal/discovery"
 	"github.com/GoHighLevel/codebase-memory-mcp/ghl/internal/mcp"
 )
 
@@ -40,6 +41,22 @@ func (f *fakeBridgeClient) CallTool(_ context.Context, name string, params map[s
 	f.toolName = name
 	f.toolArgs = params
 	return f.toolResult, f.toolErr
+}
+
+type fakeDiscoverer struct {
+	definition discovery.ToolDefinition
+	request    discovery.Request
+	response   discovery.Response
+	err        error
+}
+
+func (f *fakeDiscoverer) Definition() discovery.ToolDefinition {
+	return f.definition
+}
+
+func (f *fakeDiscoverer) DiscoverProjects(_ context.Context, req discovery.Request) (discovery.Response, error) {
+	f.request = req
+	return f.response, f.err
 }
 
 func TestMCPBridgeBackendInitializeNegotiatesProtocol(t *testing.T) {
@@ -93,6 +110,46 @@ func TestMCPBridgeBackendForwardsToolsList(t *testing.T) {
 	}
 }
 
+func TestMCPBridgeBackendToolsListIncludesDiscoverProjects(t *testing.T) {
+	client := &fakeBridgeClient{
+		callResult: json.RawMessage(`{"tools":[{"name":"list_projects"}]}`),
+	}
+	backend := &mcpBridgeBackend{
+		client: client,
+		discovery: &fakeDiscoverer{
+			definition: discovery.ToolDefinition{
+				Name:        "discover_projects",
+				Description: "Discover likely repos",
+				InputSchema: map[string]interface{}{"type": "object"},
+			},
+		},
+	}
+
+	raw, err := backend.Call("tools/list", nil)
+	if err != nil {
+		t.Fatalf("tools/list: %v", err)
+	}
+
+	var result struct {
+		Tools []struct {
+			Name string `json:"name"`
+		} `json:"tools"`
+	}
+	if err := json.Unmarshal(raw, &result); err != nil {
+		t.Fatalf("parse tools/list result: %v", err)
+	}
+
+	if len(result.Tools) != 2 {
+		t.Fatalf("tools count: want 2, got %d", len(result.Tools))
+	}
+	if result.Tools[0].Name != "list_projects" {
+		t.Fatalf("first tool: want list_projects, got %q", result.Tools[0].Name)
+	}
+	if result.Tools[1].Name != "discover_projects" {
+		t.Fatalf("second tool: want discover_projects, got %q", result.Tools[1].Name)
+	}
+}
+
 func TestMCPBridgeBackendForwardsToolsCall(t *testing.T) {
 	client := &fakeBridgeClient{
 		toolResult: &mcp.ToolResult{
@@ -114,6 +171,53 @@ func TestMCPBridgeBackendForwardsToolsCall(t *testing.T) {
 	}
 	if string(raw) != `{"content":[{"type":"text","text":"ok"}],"isError":false}` {
 		t.Errorf("raw result: got %s", raw)
+	}
+}
+
+func TestMCPBridgeBackendHandlesDiscoverProjects(t *testing.T) {
+	backend := &mcpBridgeBackend{
+		client: &fakeBridgeClient{},
+		discovery: &fakeDiscoverer{
+			response: discovery.Response{
+				Query: "membership checkout lock",
+				PrimaryRepos: []discovery.Candidate{
+					{Project: "app-fleet-cache-membership-backend", RepoSlug: "membership-backend"},
+				},
+			},
+		},
+	}
+
+	raw, err := backend.Call("tools/call", json.RawMessage(`{"name":"discover_projects","arguments":{"query":"membership checkout lock","limit":3}}`))
+	if err != nil {
+		t.Fatalf("tools/call discover_projects: %v", err)
+	}
+
+	var result struct {
+		Content []struct {
+			Type string `json:"type"`
+			Text string `json:"text"`
+		} `json:"content"`
+		IsError bool `json:"isError"`
+	}
+	if err := json.Unmarshal(raw, &result); err != nil {
+		t.Fatalf("parse discover_projects result: %v", err)
+	}
+	if result.IsError {
+		t.Fatal("discover_projects result unexpectedly marked as error")
+	}
+	if len(result.Content) != 1 {
+		t.Fatalf("content count: want 1, got %d", len(result.Content))
+	}
+
+	var payload discovery.Response
+	if err := json.Unmarshal([]byte(result.Content[0].Text), &payload); err != nil {
+		t.Fatalf("parse discover_projects payload: %v", err)
+	}
+	if payload.Query != "membership checkout lock" {
+		t.Fatalf("query: want %q, got %q", "membership checkout lock", payload.Query)
+	}
+	if len(payload.PrimaryRepos) != 1 || payload.PrimaryRepos[0].RepoSlug != "membership-backend" {
+		t.Fatalf("unexpected primary repos: %+v", payload.PrimaryRepos)
 	}
 }
 

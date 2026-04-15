@@ -28,6 +28,7 @@ import (
 	"github.com/robfig/cron/v3"
 
 	"github.com/GoHighLevel/codebase-memory-mcp/ghl/internal/bridge"
+	"github.com/GoHighLevel/codebase-memory-mcp/ghl/internal/discovery"
 	"github.com/GoHighLevel/codebase-memory-mcp/ghl/internal/indexer"
 	"github.com/GoHighLevel/codebase-memory-mcp/ghl/internal/manifest"
 	"github.com/GoHighLevel/codebase-memory-mcp/ghl/internal/mcp"
@@ -77,8 +78,17 @@ func main() {
 	defer indexPool.Close()
 	slog.Info("indexer client pool started", "clients", cfg.IndexerClients)
 
+	discoveryPool, err := newMCPDiscoveryClientPool(ctx, cfg.BinaryPath, cfg.DiscoveryClients)
+	if err != nil {
+		slog.Error("failed to start discovery client pool", "clients", cfg.DiscoveryClients, "err", err)
+		os.Exit(1)
+	}
+	defer discoveryPool.Close()
+	slog.Info("discovery client pool started", "clients", cfg.DiscoveryClients)
+
 	// ── Build indexer ────────────────────────────────────────
 
+	var discoverySvc *discovery.Discoverer
 	cloner := &gitCloner{
 		logger:      logger,
 		githubToken: cfg.GitHubToken,
@@ -95,8 +105,21 @@ func main() {
 				slog.Error("repo indexing failed", "repo", slug, "err", err)
 				return
 			}
+			if discoverySvc != nil {
+				discoverySvc.Invalidate()
+			}
 			slog.Info("repo indexed", "repo", slug)
 		},
+	})
+
+	maxGraphCandidates := 3
+	if cfg.DiscoveryMaxCandidates > 0 && cfg.DiscoveryMaxCandidates < maxGraphCandidates {
+		maxGraphCandidates = cfg.DiscoveryMaxCandidates
+	}
+	discoverySvc = discovery.NewService(discoveryPool, *m, discovery.Options{
+		MaxBM25Candidates:  cfg.DiscoveryMaxCandidates,
+		MaxGraphCandidates: maxGraphCandidates,
+		RequestTimeout:     cfg.DiscoveryTimeout,
 	})
 
 	// ── Fleet scheduler ──────────────────────────────────────
@@ -127,7 +150,7 @@ func main() {
 
 	// Bridge: forward MCP calls to the binary
 	bridgeHandler := bridge.NewHandler(
-		&mcpBridgeBackend{client: mcpClient},
+		&mcpBridgeBackend{client: mcpClient, discovery: discoverySvc},
 		bridge.Config{BearerToken: cfg.BearerToken},
 	)
 	r.Mount("/mcp", bridgeHandler)
@@ -171,13 +194,16 @@ func main() {
 	r.Get("/status", func(w http.ResponseWriter, req *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(map[string]interface{}{
-			"repos":           len(m.Repos),
-			"version":         mcpClient.ServerInfo().Version,
-			"binary":          cfg.BinaryPath,
-			"cache":           cfg.CacheDir,
-			"manifest":        cfg.ReposManifest,
-			"concurrency":     cfg.Concurrency,
-			"indexer_clients": cfg.IndexerClients,
+			"repos":                    len(m.Repos),
+			"version":                  mcpClient.ServerInfo().Version,
+			"binary":                   cfg.BinaryPath,
+			"cache":                    cfg.CacheDir,
+			"manifest":                 cfg.ReposManifest,
+			"concurrency":              cfg.Concurrency,
+			"indexer_clients":          cfg.IndexerClients,
+			"discovery_clients":        cfg.DiscoveryClients,
+			"discovery_max_candidates": cfg.DiscoveryMaxCandidates,
+			"discovery_timeout_ms":     cfg.DiscoveryTimeout.Milliseconds(),
 		})
 	})
 
@@ -221,17 +247,20 @@ func main() {
 // ── Config ─────────────────────────────────────────────────────
 
 type config struct {
-	Port            string
-	BinaryPath      string
-	CacheDir        string
-	ReposManifest   string
-	BearerToken     string
-	GitHubToken     string
-	WebhookSecret   string
-	Concurrency     int
-	IndexerClients  int
-	IncrementalCron string
-	FullCron        string
+	Port                   string
+	BinaryPath             string
+	CacheDir               string
+	ReposManifest          string
+	BearerToken            string
+	GitHubToken            string
+	WebhookSecret          string
+	Concurrency            int
+	IndexerClients         int
+	DiscoveryClients       int
+	DiscoveryMaxCandidates int
+	DiscoveryTimeout       time.Duration
+	IncrementalCron        string
+	FullCron               string
 }
 
 func loadConfig() config {
@@ -259,19 +288,58 @@ func loadConfig() config {
 		}
 		return n
 	}
+	getDiscoveryClients := func(concurrency int) int {
+		v := getEnv("DISCOVERY_CLIENTS", "")
+		if v == "" {
+			if concurrency < 2 {
+				return 2
+			}
+			return concurrency
+		}
+		n := concurrency
+		fmt.Sscanf(v, "%d", &n)
+		if n <= 0 {
+			if concurrency < 2 {
+				return 2
+			}
+			return concurrency
+		}
+		return n
+	}
+	getDiscoveryMaxCandidates := func() int {
+		v := getEnv("DISCOVERY_MAX_CANDIDATES", "5")
+		n := 5
+		fmt.Sscanf(v, "%d", &n)
+		if n <= 0 {
+			return 5
+		}
+		return n
+	}
+	getDiscoveryTimeout := func() time.Duration {
+		v := getEnv("DISCOVERY_TIMEOUT_MS", "5000")
+		n := 5000
+		fmt.Sscanf(v, "%d", &n)
+		if n <= 0 {
+			return 5 * time.Second
+		}
+		return time.Duration(n) * time.Millisecond
+	}
 	concurrency := getConcurrency()
 	return config{
-		Port:            getEnv("PORT", "8080"),
-		BinaryPath:      getEnv("CBM_BINARY", defaultBinaryPath()),
-		CacheDir:        getEnv("FLEET_CACHE_DIR", "/app/fleet-cache"),
-		ReposManifest:   getEnv("REPOS_MANIFEST", defaultManifestPath()),
-		BearerToken:     getEnv("BEARER_TOKEN", ""),
-		GitHubToken:     getEnv("GITHUB_TOKEN", ""),
-		WebhookSecret:   getEnv("GITHUB_WEBHOOK_SECRET", ""),
-		Concurrency:     concurrency,
-		IndexerClients:  getIndexerClients(concurrency),
-		IncrementalCron: getEnv("CRON_INCREMENTAL", "0 */6 * * *"),
-		FullCron:        getEnv("CRON_FULL", "0 2 * * 0"),
+		Port:                   getEnv("PORT", "8080"),
+		BinaryPath:             getEnv("CBM_BINARY", defaultBinaryPath()),
+		CacheDir:               getEnv("FLEET_CACHE_DIR", "/app/fleet-cache"),
+		ReposManifest:          getEnv("REPOS_MANIFEST", defaultManifestPath()),
+		BearerToken:            getEnv("BEARER_TOKEN", ""),
+		GitHubToken:            getEnv("GITHUB_TOKEN", ""),
+		WebhookSecret:          getEnv("GITHUB_WEBHOOK_SECRET", ""),
+		Concurrency:            concurrency,
+		IndexerClients:         getIndexerClients(concurrency),
+		DiscoveryClients:       getDiscoveryClients(concurrency),
+		DiscoveryMaxCandidates: getDiscoveryMaxCandidates(),
+		DiscoveryTimeout:       getDiscoveryTimeout(),
+		IncrementalCron:        getEnv("CRON_INCREMENTAL", "0 */6 * * *"),
+		FullCron:               getEnv("CRON_FULL", "0 2 * * 0"),
 	}
 }
 
@@ -428,16 +496,16 @@ var newIndexToolClient = func(ctx context.Context, binPath string) (indexToolCli
 	return mcp.NewClient(ctx, binPath)
 }
 
-type mcpIndexClientPool struct {
+type mcpToolClientPool struct {
 	clients chan indexToolClient
 	all     []indexToolClient
 }
 
-func newMCPIndexClientPool(ctx context.Context, binPath string, size int) (*mcpIndexClientPool, error) {
+func newMCPToolClientPool(ctx context.Context, binPath string, size int) (*mcpToolClientPool, error) {
 	if size <= 0 {
 		size = 1
 	}
-	pool := &mcpIndexClientPool{
+	pool := &mcpToolClientPool{
 		clients: make(chan indexToolClient, size),
 		all:     make([]indexToolClient, 0, size),
 	}
@@ -453,13 +521,13 @@ func newMCPIndexClientPool(ctx context.Context, binPath string, size int) (*mcpI
 	return pool, nil
 }
 
-func (p *mcpIndexClientPool) Close() {
+func (p *mcpToolClientPool) Close() {
 	for _, client := range p.all {
 		client.Close()
 	}
 }
 
-func (p *mcpIndexClientPool) borrow(ctx context.Context) (indexToolClient, error) {
+func (p *mcpToolClientPool) borrow(ctx context.Context) (indexToolClient, error) {
 	select {
 	case client := <-p.clients:
 		return client, nil
@@ -468,21 +536,36 @@ func (p *mcpIndexClientPool) borrow(ctx context.Context) (indexToolClient, error
 	}
 }
 
-func (p *mcpIndexClientPool) release(client indexToolClient) {
+func (p *mcpToolClientPool) release(client indexToolClient) {
 	if client == nil {
 		return
 	}
 	p.clients <- client
 }
 
-func (p *mcpIndexClientPool) IndexRepository(ctx context.Context, repoPath, mode string) error {
+func (p *mcpToolClientPool) CallTool(ctx context.Context, name string, params map[string]interface{}) (*mcp.ToolResult, error) {
 	client, err := p.borrow(ctx)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	defer p.release(client)
+	return client.CallTool(ctx, name, params)
+}
 
-	result, err := client.CallTool(ctx, "index_repository", map[string]interface{}{
+type mcpIndexClientPool struct {
+	*mcpToolClientPool
+}
+
+func newMCPIndexClientPool(ctx context.Context, binPath string, size int) (*mcpIndexClientPool, error) {
+	pool, err := newMCPToolClientPool(ctx, binPath, size)
+	if err != nil {
+		return nil, err
+	}
+	return &mcpIndexClientPool{mcpToolClientPool: pool}, nil
+}
+
+func (p *mcpIndexClientPool) IndexRepository(ctx context.Context, repoPath, mode string) error {
+	result, err := p.CallTool(ctx, "index_repository", map[string]interface{}{
 		"repo_path": repoPath,
 		"mode":      mode,
 	})
@@ -499,6 +582,18 @@ func (p *mcpIndexClientPool) IndexRepository(ctx context.Context, repoPath, mode
 	return nil
 }
 
+type mcpDiscoveryClientPool struct {
+	*mcpToolClientPool
+}
+
+func newMCPDiscoveryClientPool(ctx context.Context, binPath string, size int) (*mcpDiscoveryClientPool, error) {
+	pool, err := newMCPToolClientPool(ctx, binPath, size)
+	if err != nil {
+		return nil, err
+	}
+	return &mcpDiscoveryClientPool{mcpToolClientPool: pool}, nil
+}
+
 type bridgeClient interface {
 	ServerInfo() mcp.ServerInfo
 	Call(ctx context.Context, method string, params interface{}) (json.RawMessage, error)
@@ -507,7 +602,8 @@ type bridgeClient interface {
 
 // mcpBridgeBackend implements bridge.Backend by forwarding to the MCP client.
 type mcpBridgeBackend struct {
-	client bridgeClient
+	client    bridgeClient
+	discovery discovery.Service
 }
 
 func (b *mcpBridgeBackend) Call(method string, params json.RawMessage) (json.RawMessage, error) {
@@ -525,7 +621,7 @@ func (b *mcpBridgeBackend) Call(method string, params json.RawMessage) (json.Raw
 		if err != nil {
 			return nil, err
 		}
-		return raw, nil
+		return b.appendDiscoveryTool(raw)
 	case "tools/call":
 		var paramMap map[string]interface{}
 		if len(params) > 0 {
@@ -539,6 +635,9 @@ func (b *mcpBridgeBackend) Call(method string, params json.RawMessage) (json.Raw
 			return nil, errors.New("missing tool name")
 		}
 		args, _ := paramMap["arguments"].(map[string]interface{})
+		if name == discovery.NewDefinition().Name {
+			return b.callDiscoveryTool(args)
+		}
 
 		result, err := b.client.CallTool(context.Background(), name, args)
 		if err != nil {
@@ -549,6 +648,69 @@ func (b *mcpBridgeBackend) Call(method string, params json.RawMessage) (json.Raw
 	default:
 		return nil, bridge.ErrMethodNotFound
 	}
+}
+
+func (b *mcpBridgeBackend) appendDiscoveryTool(raw json.RawMessage) (json.RawMessage, error) {
+	if b.discovery == nil {
+		return raw, nil
+	}
+
+	var payload struct {
+		Tools []map[string]interface{} `json:"tools"`
+	}
+	if err := json.Unmarshal(raw, &payload); err != nil {
+		return nil, fmt.Errorf("parse tools/list response: %w", err)
+	}
+
+	def := b.discovery.Definition()
+	tool := map[string]interface{}{
+		"name":        def.Name,
+		"description": def.Description,
+		"inputSchema": def.InputSchema,
+	}
+	payload.Tools = append(payload.Tools, tool)
+	return json.Marshal(payload)
+}
+
+func (b *mcpBridgeBackend) callDiscoveryTool(args map[string]interface{}) (json.RawMessage, error) {
+	if b.discovery == nil {
+		return nil, errors.New("discover_projects unavailable")
+	}
+
+	var req discovery.Request
+	if args != nil {
+		rawArgs, err := json.Marshal(args)
+		if err != nil {
+			return nil, fmt.Errorf("marshal discover_projects args: %w", err)
+		}
+		if err := json.Unmarshal(rawArgs, &req); err != nil {
+			return nil, fmt.Errorf("parse discover_projects args: %w", err)
+		}
+	}
+	req.Query = strings.TrimSpace(req.Query)
+	if req.Query == "" {
+		return nil, errors.New("discover_projects: query is required")
+	}
+	if req.Limit <= 0 {
+		req.Limit = 5
+	}
+	if _, ok := args["include_graph_confidence"]; !ok {
+		req.IncludeGraphConfidence = true
+	}
+
+	resp, err := b.discovery.DiscoverProjects(context.Background(), req)
+	if err != nil {
+		return nil, err
+	}
+	text, err := json.Marshal(resp)
+	if err != nil {
+		return nil, fmt.Errorf("marshal discover_projects response: %w", err)
+	}
+
+	return json.Marshal(mcp.ToolResult{
+		Content: []mcp.Content{{Type: "text", Text: string(text)}},
+		IsError: false,
+	})
 }
 
 func (b *mcpBridgeBackend) initialize(params json.RawMessage) (json.RawMessage, error) {
