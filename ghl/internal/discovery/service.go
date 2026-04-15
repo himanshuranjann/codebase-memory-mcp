@@ -348,55 +348,36 @@ func metadataScore(query string, queryTokens []string, entry catalogEntry) (floa
 }
 
 func (d *Discoverer) applyBM25Scores(ctx context.Context, req Request, queryTokens []string, candidates []candidateScore) error {
-	var wg sync.WaitGroup
-	errCh := make(chan error, len(candidates))
-
 	for i := range candidates {
-		i := i
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-
-			args := map[string]interface{}{
-				"project": candidates[i].Project,
-				"query":   req.Query,
-				"limit":   8,
+		args := map[string]interface{}{
+			"project": candidates[i].Project,
+			"query":   req.Query,
+			"limit":   8,
+		}
+		if req.IncludeSemantic {
+			if semanticKeywords := semanticKeywords(queryTokens); len(semanticKeywords) > 0 {
+				args["semantic_query"] = semanticKeywords
 			}
-			if req.IncludeSemantic {
-				if semanticKeywords := semanticKeywords(queryTokens); len(semanticKeywords) > 0 {
-					args["semantic_query"] = semanticKeywords
-				}
-			}
+		}
 
-			result, err := d.caller.CallTool(ctx, "search_graph", args)
-			if err != nil {
-				errCh <- fmt.Errorf("search_graph %s: %w", candidates[i].Project, err)
-				return
-			}
-
-			var payload searchGraphPayload
-			if err := decodeToolPayload(result, &payload); err != nil {
-				errCh <- fmt.Errorf("decode search_graph %s: %w", candidates[i].Project, err)
-				return
-			}
-
-			add, reasons := bm25Score(payload)
-			candidates[i].Score = clamp(candidates[i].Score+add, 0, 1.0)
-			candidates[i].Reasons = dedupeStrings(append(candidates[i].Reasons, reasons...))
-
-			if req.IncludeSemantic {
-				semAdd, semReasons := semanticScore(payload)
-				candidates[i].Score = clamp(candidates[i].Score+semAdd, 0, 1.0)
-				candidates[i].Reasons = dedupeStrings(append(candidates[i].Reasons, semReasons...))
-			}
-		}()
-	}
-
-	wg.Wait()
-	close(errCh)
-	for err := range errCh {
+		result, err := d.caller.CallTool(ctx, "search_graph", args)
 		if err != nil {
-			return err
+			return fmt.Errorf("search_graph %s: %w", candidates[i].Project, err)
+		}
+
+		var payload searchGraphPayload
+		if err := decodeToolPayload(result, &payload); err != nil {
+			return fmt.Errorf("decode search_graph %s: %w", candidates[i].Project, err)
+		}
+
+		add, reasons := bm25Score(payload)
+		candidates[i].Score = clamp(candidates[i].Score+add, 0, 1.0)
+		candidates[i].Reasons = dedupeStrings(append(candidates[i].Reasons, reasons...))
+
+		if req.IncludeSemantic {
+			semAdd, semReasons := semanticScore(payload)
+			candidates[i].Score = clamp(candidates[i].Score+semAdd, 0, 1.0)
+			candidates[i].Reasons = dedupeStrings(append(candidates[i].Reasons, semReasons...))
 		}
 	}
 	return nil
