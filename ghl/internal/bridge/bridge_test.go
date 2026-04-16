@@ -19,9 +19,11 @@ type fakeBackend struct {
 	method   string
 	params   json.RawMessage
 	calls    int
+	ctx      context.Context
 }
 
-func (f *fakeBackend) Call(method string, params json.RawMessage) (json.RawMessage, error) {
+func (f *fakeBackend) Call(ctx context.Context, method string, params json.RawMessage) (json.RawMessage, error) {
+	f.ctx = ctx
 	f.method = method
 	f.params = append(json.RawMessage(nil), params...)
 	f.calls++
@@ -90,6 +92,9 @@ func TestBridge_ForwardsToolCall(t *testing.T) {
 	if backend.method != "tools/call" {
 		t.Errorf("method: want tools/call, got %q", backend.method)
 	}
+	if backend.ctx == nil {
+		t.Error("backend ctx: expected request context to be forwarded")
+	}
 }
 
 func TestBridge_ReturnsErrorOnBackendFailure(t *testing.T) {
@@ -111,6 +116,24 @@ func TestBridge_ReturnsErrorOnBackendFailure(t *testing.T) {
 	json.Unmarshal(rr.Body.Bytes(), &resp)
 	if resp["error"] == nil {
 		t.Error("expected JSON-RPC error field for backend failure")
+	}
+}
+
+func TestBridge_ReturnsServiceUnavailableWhenBackendBusy(t *testing.T) {
+	backend := &fakeBackend{err: bridge.ErrBackendBusy}
+	h := bridge.NewHandler(backend, bridge.Config{})
+
+	body := mcpRequest(t, 2, "tools/call", map[string]interface{}{"name": "list_projects"})
+	req := httptest.NewRequest(http.MethodPost, "/mcp", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rr := httptest.NewRecorder()
+	h.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusServiceUnavailable {
+		t.Fatalf("status: want 503, got %d", rr.Code)
+	}
+	if got := rr.Header().Get("Retry-After"); got != "1" {
+		t.Fatalf("Retry-After: want 1, got %q", got)
 	}
 }
 

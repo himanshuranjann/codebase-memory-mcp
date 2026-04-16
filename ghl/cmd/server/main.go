@@ -59,18 +59,24 @@ func main() {
 	}
 	slog.Info("fleet manifest loaded", "repos", len(m.Repos))
 
-	// ── Start MCP binary client ──────────────────────────────
+	// ── Start MCP binary clients ─────────────────────────────
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
-	mcpClient, err := mcp.NewClient(ctx, cfg.BinaryPath)
+	bridgePool, err := newMCPBridgeClientPool(ctx, cfg.BinaryPath, cfg.BridgeClients, cfg.BridgeAcquireTimeout)
 	if err != nil {
-		slog.Error("failed to start codebase-memory-mcp binary", "binary", cfg.BinaryPath, "err", err)
+		slog.Error("failed to start bridge client pool", "binary", cfg.BinaryPath, "clients", cfg.BridgeClients, "err", err)
 		os.Exit(1)
 	}
-	defer mcpClient.Close()
-	slog.Info("codebase-memory-mcp started", "name", mcpClient.ServerInfo().Name, "version", mcpClient.ServerInfo().Version)
+	defer bridgePool.Close()
+	slog.Info(
+		"bridge client pool started",
+		"name", bridgePool.ServerInfo().Name,
+		"version", bridgePool.ServerInfo().Version,
+		"clients", cfg.BridgeClients,
+		"acquire_timeout_ms", cfg.BridgeAcquireTimeout.Milliseconds(),
+	)
 
 	indexPool, err := newMCPIndexClientPool(ctx, cfg.BinaryPath, cfg.IndexerClients)
 	if err != nil {
@@ -162,7 +168,7 @@ func main() {
 
 	// Bridge: forward MCP calls to the binary
 	bridgeHandler := bridge.NewHandler(
-		&mcpBridgeBackend{client: mcpClient, discovery: discoverySvc},
+		&mcpBridgeBackend{client: bridgePool, discovery: discoverySvc},
 		bridge.Config{BearerToken: cfg.BearerToken, Authenticator: requestAuthenticator},
 	)
 	r.Mount("/mcp", bridgeHandler)
@@ -209,11 +215,13 @@ func main() {
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(map[string]interface{}{
 			"repos":                    len(m.Repos),
-			"version":                  mcpClient.ServerInfo().Version,
+			"version":                  bridgePool.ServerInfo().Version,
 			"binary":                   cfg.BinaryPath,
 			"cache":                    cfg.CacheDir,
 			"manifest":                 cfg.ReposManifest,
 			"concurrency":              cfg.Concurrency,
+			"bridge_clients":           cfg.BridgeClients,
+			"bridge_acquire_timeout":   cfg.BridgeAcquireTimeout.Milliseconds(),
 			"indexer_clients":          cfg.IndexerClients,
 			"discovery_clients":        cfg.DiscoveryClients,
 			"discovery_max_candidates": cfg.DiscoveryMaxCandidates,
@@ -298,6 +306,8 @@ type config struct {
 	GitHubAuthCacheTTL     time.Duration
 	WebhookSecret          string
 	Concurrency            int
+	BridgeClients          int
+	BridgeAcquireTimeout   time.Duration
 	IndexerClients         int
 	DiscoveryClients       int
 	DiscoveryMaxCandidates int
@@ -347,6 +357,34 @@ func loadConfig() config {
 		n := 5
 		fmt.Sscanf(v, "%d", &n)
 		return n
+	}
+	getBridgeClients := func() int {
+		v := getEnv("BRIDGE_CLIENTS", "")
+		if v == "" {
+			n := runtime.GOMAXPROCS(0)
+			if n < 2 {
+				return 2
+			}
+			if n > 4 {
+				return 4
+			}
+			return n
+		}
+		n := 1
+		fmt.Sscanf(v, "%d", &n)
+		if n <= 0 {
+			return 1
+		}
+		return n
+	}
+	getBridgeAcquireTimeout := func() time.Duration {
+		v := getEnv("BRIDGE_ACQUIRE_TIMEOUT_MS", "1500")
+		n := 1500
+		fmt.Sscanf(v, "%d", &n)
+		if n <= 0 {
+			return 1500 * time.Millisecond
+		}
+		return time.Duration(n) * time.Millisecond
 	}
 	getIndexerClients := func(concurrency int) int {
 		v := getEnv("INDEXER_CLIENTS", "")
@@ -419,6 +457,8 @@ func loadConfig() config {
 		GitHubAuthCacheTTL:     getGitHubAuthCacheTTL(),
 		WebhookSecret:          getEnv("GITHUB_WEBHOOK_SECRET", ""),
 		Concurrency:            concurrency,
+		BridgeClients:          getBridgeClients(),
+		BridgeAcquireTimeout:   getBridgeAcquireTimeout(),
 		IndexerClients:         getIndexerClients(concurrency),
 		DiscoveryClients:       getDiscoveryClients(concurrency),
 		DiscoveryMaxCandidates: getDiscoveryMaxCandidates(),
@@ -570,6 +610,170 @@ func hasWorkingTreeFiles(root string) (bool, error) {
 		return false, err
 	}
 	return found, nil
+}
+
+type bridgePoolClient interface {
+	ServerInfo() mcp.ServerInfo
+	Call(ctx context.Context, method string, params interface{}) (json.RawMessage, error)
+	CallTool(ctx context.Context, name string, params map[string]interface{}) (*mcp.ToolResult, error)
+	Close()
+}
+
+var newBridgePoolClient = func(ctx context.Context, binPath string) (bridgePoolClient, error) {
+	return mcp.NewClient(ctx, binPath)
+}
+
+type mcpBridgeClientPool struct {
+	binPath        string
+	acquireTimeout time.Duration
+	mu             sync.Mutex
+	clients        chan bridgePoolClient
+	all            []bridgePoolClient
+	info           mcp.ServerInfo
+}
+
+func newMCPBridgeClientPool(ctx context.Context, binPath string, size int, acquireTimeout time.Duration) (*mcpBridgeClientPool, error) {
+	if size <= 0 {
+		size = 1
+	}
+	pool := &mcpBridgeClientPool{
+		binPath:        binPath,
+		acquireTimeout: acquireTimeout,
+		clients:        make(chan bridgePoolClient, size),
+		all:            make([]bridgePoolClient, 0, size),
+	}
+	for i := 0; i < size; i++ {
+		client, err := newBridgePoolClient(ctx, binPath)
+		if err != nil {
+			pool.Close()
+			return nil, fmt.Errorf("start bridge client %d/%d: %w", i+1, size, err)
+		}
+		if i == 0 {
+			pool.info = client.ServerInfo()
+		}
+		pool.all = append(pool.all, client)
+		pool.clients <- client
+	}
+	return pool, nil
+}
+
+func (p *mcpBridgeClientPool) ServerInfo() mcp.ServerInfo {
+	return p.info
+}
+
+func (p *mcpBridgeClientPool) Close() {
+	for _, client := range p.all {
+		client.Close()
+	}
+}
+
+func (p *mcpBridgeClientPool) borrow(ctx context.Context) (bridgePoolClient, error) {
+	if p.acquireTimeout <= 0 {
+		select {
+		case client := <-p.clients:
+			return client, nil
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+	}
+
+	acquireCtx, cancel := context.WithTimeoutCause(ctx, p.acquireTimeout, bridge.ErrBackendBusy)
+	defer cancel()
+
+	select {
+	case client := <-p.clients:
+		return client, nil
+	case <-acquireCtx.Done():
+		if errors.Is(context.Cause(acquireCtx), bridge.ErrBackendBusy) {
+			return nil, bridge.ErrBackendBusy
+		}
+		return nil, ctx.Err()
+	}
+}
+
+func (p *mcpBridgeClientPool) release(client bridgePoolClient) {
+	if client == nil {
+		return
+	}
+	p.clients <- client
+}
+
+func (p *mcpBridgeClientPool) Call(ctx context.Context, method string, params interface{}) (json.RawMessage, error) {
+	client, err := p.borrow(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	type callResult struct {
+		result json.RawMessage
+		err    error
+	}
+
+	resultCh := make(chan callResult, 1)
+	go func() {
+		result, callErr := client.Call(ctx, method, params)
+		resultCh <- callResult{result: result, err: callErr}
+	}()
+
+	select {
+	case out := <-resultCh:
+		p.release(client)
+		return out.result, out.err
+	case <-ctx.Done():
+		client.Close()
+		go p.replaceClientAsync(client)
+		return nil, ctx.Err()
+	}
+}
+
+func (p *mcpBridgeClientPool) CallTool(ctx context.Context, name string, params map[string]interface{}) (*mcp.ToolResult, error) {
+	client, err := p.borrow(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	type toolCallResult struct {
+		result *mcp.ToolResult
+		err    error
+	}
+
+	resultCh := make(chan toolCallResult, 1)
+	go func() {
+		result, callErr := client.CallTool(ctx, name, params)
+		resultCh <- toolCallResult{result: result, err: callErr}
+	}()
+
+	select {
+	case out := <-resultCh:
+		p.release(client)
+		return out.result, out.err
+	case <-ctx.Done():
+		client.Close()
+		go p.replaceClientAsync(client)
+		return nil, ctx.Err()
+	}
+}
+
+func (p *mcpBridgeClientPool) replaceClientAsync(dead bridgePoolClient) {
+	replacementCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	replacement, err := newBridgePoolClient(replacementCtx, p.binPath)
+	if err != nil {
+		slog.Error("failed to replace timed out bridge client", "err", err)
+		return
+	}
+
+	p.mu.Lock()
+	for i, client := range p.all {
+		if client == dead {
+			p.all[i] = replacement
+			break
+		}
+	}
+	p.mu.Unlock()
+
+	p.release(replacement)
 }
 
 type indexToolClient interface {
@@ -735,7 +939,7 @@ type mcpBridgeBackend struct {
 	discovery discovery.Service
 }
 
-func (b *mcpBridgeBackend) Call(method string, params json.RawMessage) (json.RawMessage, error) {
+func (b *mcpBridgeBackend) Call(ctx context.Context, method string, params json.RawMessage) (json.RawMessage, error) {
 	if b.client == nil {
 		return nil, bridge.ErrBackendUnavailable
 	}
@@ -746,7 +950,7 @@ func (b *mcpBridgeBackend) Call(method string, params json.RawMessage) (json.Raw
 	case "ping":
 		return json.RawMessage(`{}`), nil
 	case "tools/list":
-		raw, err := b.client.Call(context.Background(), "tools/list", nil)
+		raw, err := b.client.Call(ctx, "tools/list", nil)
 		if err != nil {
 			return nil, err
 		}
@@ -765,10 +969,10 @@ func (b *mcpBridgeBackend) Call(method string, params json.RawMessage) (json.Raw
 		}
 		args, _ := paramMap["arguments"].(map[string]interface{})
 		if name == discovery.NewDefinition().Name {
-			return b.callDiscoveryTool(args)
+			return b.callDiscoveryTool(ctx, args)
 		}
 
-		result, err := b.client.CallTool(context.Background(), name, args)
+		result, err := b.client.CallTool(ctx, name, args)
 		if err != nil {
 			return nil, err
 		}
@@ -801,7 +1005,7 @@ func (b *mcpBridgeBackend) appendDiscoveryTool(raw json.RawMessage) (json.RawMes
 	return json.Marshal(payload)
 }
 
-func (b *mcpBridgeBackend) callDiscoveryTool(args map[string]interface{}) (json.RawMessage, error) {
+func (b *mcpBridgeBackend) callDiscoveryTool(ctx context.Context, args map[string]interface{}) (json.RawMessage, error) {
 	if b.discovery == nil {
 		return nil, errors.New("discover_projects unavailable")
 	}
@@ -827,7 +1031,7 @@ func (b *mcpBridgeBackend) callDiscoveryTool(args map[string]interface{}) (json.
 		req.IncludeGraphConfidence = true
 	}
 
-	resp, err := b.discovery.DiscoverProjects(context.Background(), req)
+	resp, err := b.discovery.DiscoverProjects(ctx, req)
 	if err != nil {
 		return nil, err
 	}

@@ -1,5 +1,4 @@
 // Package bridge exposes the codebase-memory-mcp stdio binary as an HTTP endpoint.
-// It serialises concurrent HTTP requests into sequential JSON-RPC calls on the binary.
 package bridge
 
 import (
@@ -14,13 +13,16 @@ import (
 // ErrBackendUnavailable is returned when the underlying MCP binary is not ready.
 var ErrBackendUnavailable = errors.New("bridge: backend unavailable")
 
+// ErrBackendBusy is returned when the backend has no capacity for another request.
+var ErrBackendBusy = errors.New("bridge: backend busy")
+
 // ErrMethodNotFound is returned when the bridge backend does not implement an MCP method.
 var ErrMethodNotFound = errors.New("bridge: method not found")
 
 // Backend is the interface to the underlying MCP binary.
 type Backend interface {
 	// Call forwards a JSON-RPC method + params and returns the raw result or error.
-	Call(method string, params json.RawMessage) (json.RawMessage, error)
+	Call(ctx context.Context, method string, params json.RawMessage) (json.RawMessage, error)
 }
 
 // Config configures the HTTP bridge.
@@ -124,13 +126,23 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	result, backendErr := h.backend.Call(req.Method, req.Params)
+	result, backendErr := h.backend.Call(r.Context(), req.Method, req.Params)
 	if backendErr != nil {
-		w.Header().Set("Content-Type", "application/json")
 		switch {
+		case errors.Is(backendErr, context.Canceled):
+			return
+		case errors.Is(backendErr, context.DeadlineExceeded):
+			http.Error(w, "backend timed out", http.StatusGatewayTimeout)
+			return
+		case errors.Is(backendErr, ErrBackendBusy):
+			w.Header().Set("Retry-After", "1")
+			http.Error(w, "backend overloaded, retry later", http.StatusServiceUnavailable)
+			return
 		case errors.Is(backendErr, ErrMethodNotFound):
+			w.Header().Set("Content-Type", "application/json")
 			writeError(w, req.ID, -32601, backendErr.Error())
 		default:
+			w.Header().Set("Content-Type", "application/json")
 			writeError(w, req.ID, -32603, "backend error: "+backendErr.Error())
 		}
 		return

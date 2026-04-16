@@ -33,10 +33,12 @@ func (f *fakeRequestAuthenticator) Authenticate(_ context.Context, bearerToken s
 
 type fakeBridgeClient struct {
 	info       mcp.ServerInfo
+	callCtx    context.Context
 	callMethod string
 	callParams interface{}
 	callResult json.RawMessage
 	callErr    error
+	toolCtx    context.Context
 	toolName   string
 	toolArgs   map[string]interface{}
 	toolResult *mcp.ToolResult
@@ -47,13 +49,15 @@ func (f *fakeBridgeClient) ServerInfo() mcp.ServerInfo {
 	return f.info
 }
 
-func (f *fakeBridgeClient) Call(_ context.Context, method string, params interface{}) (json.RawMessage, error) {
+func (f *fakeBridgeClient) Call(ctx context.Context, method string, params interface{}) (json.RawMessage, error) {
+	f.callCtx = ctx
 	f.callMethod = method
 	f.callParams = params
 	return f.callResult, f.callErr
 }
 
-func (f *fakeBridgeClient) CallTool(_ context.Context, name string, params map[string]interface{}) (*mcp.ToolResult, error) {
+func (f *fakeBridgeClient) CallTool(ctx context.Context, name string, params map[string]interface{}) (*mcp.ToolResult, error) {
+	f.toolCtx = ctx
 	f.toolName = name
 	f.toolArgs = params
 	return f.toolResult, f.toolErr
@@ -82,7 +86,7 @@ func TestMCPBridgeBackendInitializeNegotiatesProtocol(t *testing.T) {
 		},
 	}
 
-	raw, err := backend.Call("initialize", json.RawMessage(`{"protocolVersion":"2025-03-26"}`))
+	raw, err := backend.Call(context.Background(), "initialize", json.RawMessage(`{"protocolVersion":"2025-03-26"}`))
 	if err != nil {
 		t.Fatalf("initialize: %v", err)
 	}
@@ -113,13 +117,16 @@ func TestMCPBridgeBackendForwardsToolsList(t *testing.T) {
 	}
 	backend := &mcpBridgeBackend{client: client}
 
-	raw, err := backend.Call("tools/list", nil)
+	raw, err := backend.Call(context.Background(), "tools/list", nil)
 	if err != nil {
 		t.Fatalf("tools/list: %v", err)
 	}
 
 	if client.callMethod != "tools/list" {
 		t.Errorf("call method: want tools/list, got %q", client.callMethod)
+	}
+	if client.callCtx == nil {
+		t.Error("call ctx: expected non-nil context")
 	}
 	if string(raw) != `{"tools":[{"name":"list_projects"}]}` {
 		t.Errorf("raw result: got %s", raw)
@@ -141,7 +148,7 @@ func TestMCPBridgeBackendToolsListIncludesDiscoverProjects(t *testing.T) {
 		},
 	}
 
-	raw, err := backend.Call("tools/list", nil)
+	raw, err := backend.Call(context.Background(), "tools/list", nil)
 	if err != nil {
 		t.Fatalf("tools/list: %v", err)
 	}
@@ -174,13 +181,16 @@ func TestMCPBridgeBackendForwardsToolsCall(t *testing.T) {
 	}
 	backend := &mcpBridgeBackend{client: client}
 
-	raw, err := backend.Call("tools/call", json.RawMessage(`{"name":"list_projects","arguments":{"project":"demo"}}`))
+	raw, err := backend.Call(context.Background(), "tools/call", json.RawMessage(`{"name":"list_projects","arguments":{"project":"demo"}}`))
 	if err != nil {
 		t.Fatalf("tools/call: %v", err)
 	}
 
 	if client.toolName != "list_projects" {
 		t.Errorf("tool name: want list_projects, got %q", client.toolName)
+	}
+	if client.toolCtx == nil {
+		t.Error("tool ctx: expected non-nil context")
 	}
 	if got := client.toolArgs["project"]; got != "demo" {
 		t.Errorf("tool args.project: want demo, got %v", got)
@@ -203,7 +213,7 @@ func TestMCPBridgeBackendHandlesDiscoverProjects(t *testing.T) {
 		},
 	}
 
-	raw, err := backend.Call("tools/call", json.RawMessage(`{"name":"discover_projects","arguments":{"query":"membership checkout lock","limit":3}}`))
+	raw, err := backend.Call(context.Background(), "tools/call", json.RawMessage(`{"name":"discover_projects","arguments":{"query":"membership checkout lock","limit":3}}`))
 	if err != nil {
 		t.Fatalf("tools/call discover_projects: %v", err)
 	}
@@ -240,7 +250,7 @@ func TestMCPBridgeBackendHandlesDiscoverProjects(t *testing.T) {
 func TestMCPBridgeBackendRejectsUnknownMethod(t *testing.T) {
 	backend := &mcpBridgeBackend{client: &fakeBridgeClient{}}
 
-	_, err := backend.Call("resources/list", nil)
+	_, err := backend.Call(context.Background(), "resources/list", nil)
 	if err == nil {
 		t.Fatal("expected error for unknown method")
 	}
@@ -383,6 +393,59 @@ func (f *fastToolClient) CallTool(ctx context.Context, name string, params map[s
 
 func (f *fastToolClient) Close() {}
 
+type blockingBridgeClient struct {
+	info    mcp.ServerInfo
+	started chan struct{}
+	once    sync.Once
+}
+
+func newBlockingBridgeClient() *blockingBridgeClient {
+	return &blockingBridgeClient{
+		info:    mcp.ServerInfo{Name: "codebase-memory-mcp", Version: "test"},
+		started: make(chan struct{}),
+	}
+}
+
+func (f *blockingBridgeClient) ServerInfo() mcp.ServerInfo {
+	return f.info
+}
+
+func (f *blockingBridgeClient) Call(ctx context.Context, method string, params interface{}) (json.RawMessage, error) {
+	f.once.Do(func() { close(f.started) })
+	<-ctx.Done()
+	return nil, ctx.Err()
+}
+
+func (f *blockingBridgeClient) CallTool(ctx context.Context, name string, params map[string]interface{}) (*mcp.ToolResult, error) {
+	f.once.Do(func() { close(f.started) })
+	<-ctx.Done()
+	return nil, ctx.Err()
+}
+
+func (f *blockingBridgeClient) Close() {}
+
+type fastBridgeClient struct {
+	info   mcp.ServerInfo
+	result json.RawMessage
+}
+
+func (f *fastBridgeClient) ServerInfo() mcp.ServerInfo {
+	return f.info
+}
+
+func (f *fastBridgeClient) Call(ctx context.Context, method string, params interface{}) (json.RawMessage, error) {
+	if f.result != nil {
+		return f.result, nil
+	}
+	return json.RawMessage(`{}`), nil
+}
+
+func (f *fastBridgeClient) CallTool(ctx context.Context, name string, params map[string]interface{}) (*mcp.ToolResult, error) {
+	return &mcp.ToolResult{}, nil
+}
+
+func (f *fastBridgeClient) Close() {}
+
 func TestMCPIndexClientPoolRunsConcurrentIndexing(t *testing.T) {
 	var inFlight atomic.Int64
 	var maxFlight atomic.Int64
@@ -505,6 +568,51 @@ func TestMCPToolClientPoolReplacesTimedOutClient(t *testing.T) {
 	}
 	if got := factoryCalls.Load(); got < 2 {
 		t.Fatalf("expected replacement factory call, got %d", got)
+	}
+}
+
+func TestMCPBridgeClientPoolReturnsBusyWhenAcquireTimesOut(t *testing.T) {
+	blocking := newBlockingBridgeClient()
+
+	prevFactory := newBridgePoolClient
+	newBridgePoolClient = func(ctx context.Context, binPath string) (bridgePoolClient, error) {
+		return blocking, nil
+	}
+	defer func() { newBridgePoolClient = prevFactory }()
+
+	pool, err := newMCPBridgeClientPool(context.Background(), "/tmp/cbm", 1, 10*time.Millisecond)
+	if err != nil {
+		t.Fatalf("newMCPBridgeClientPool: %v", err)
+	}
+	defer pool.Close()
+
+	firstCtx, firstCancel := context.WithCancel(context.Background())
+	defer firstCancel()
+
+	errCh := make(chan error, 1)
+	go func() {
+		_, callErr := pool.Call(firstCtx, "tools/list", nil)
+		errCh <- callErr
+	}()
+
+	select {
+	case <-blocking.started:
+	case <-time.After(time.Second):
+		t.Fatal("first bridge call did not start")
+	}
+
+	start := time.Now()
+	_, err = pool.Call(context.Background(), "tools/list", nil)
+	if !errors.Is(err, bridge.ErrBackendBusy) {
+		t.Fatalf("expected ErrBackendBusy, got %v", err)
+	}
+	if elapsed := time.Since(start); elapsed > 500*time.Millisecond {
+		t.Fatalf("busy call returned too slowly: %s", elapsed)
+	}
+
+	firstCancel()
+	if callErr := <-errCh; !errors.Is(callErr, context.Canceled) {
+		t.Fatalf("expected first call to be canceled, got %v", callErr)
 	}
 }
 
