@@ -9,11 +9,34 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"os"
 	"strings"
 	"sync"
 
 	"github.com/GoHighLevel/codebase-memory-mcp/ghl/internal/manifest"
 )
+
+// LoadTeamOverrides loads a JSON file mapping repo names to team names.
+// Returns empty map if file doesn't exist.
+func LoadTeamOverrides(path string) map[string]string {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return make(map[string]string)
+	}
+	var overrides map[string]string
+	if err := json.Unmarshal(data, &overrides); err != nil {
+		log.Printf("orgdiscovery: failed to parse team overrides: %v", err)
+		return make(map[string]string)
+	}
+	// Remove comment keys
+	delete(overrides, "_comment")
+	return overrides
+}
+
+// SetTeamOverrides sets manual team overrides for the scanner.
+func (s *Scanner) SetTeamOverrides(overrides map[string]string) {
+	s.teamOverrides = overrides
+}
 
 // EnrichOwnership enriches repos with team ownership from CODEOWNERS files
 // and GitHub Teams API. Updates the Team field on each repo.
@@ -30,12 +53,12 @@ func (s *Scanner) EnrichOwnership(ctx context.Context, repos []manifest.Repo) er
 	codeownersMap := s.fetchAllCodeowners(ctx, repos)
 
 	for i, repo := range repos {
-		// Priority 1: CODEOWNERS catch-all
+		// Priority 1: CODEOWNERS catch-all (@org/team format)
 		if owner := codeownersMap[repo.Name]; owner != "" {
 			repos[i].Team = owner
 			continue
 		}
-		// Priority 2: GitHub Teams (admin permission)
+		// Priority 2: GitHub Teams API (team-*-devs, most specific)
 		if team := teamsMap[repo.Name]; team != "" {
 			repos[i].Team = team
 			continue
@@ -44,7 +67,14 @@ func (s *Scanner) EnrichOwnership(ctx context.Context, repos []manifest.Repo) er
 		if repos[i].Team != "" {
 			continue
 		}
-		// Priority 4: Infer from repo name prefix
+		// Priority 4: Manual overrides file (team-overrides.json)
+		if s.teamOverrides != nil {
+			if team, ok := s.teamOverrides[repo.Name]; ok {
+				repos[i].Team = team
+				continue
+			}
+		}
+		// Priority 5: Infer from repo name prefix/patterns
 		repos[i].Team = inferTeamFromName(repo.Name)
 	}
 

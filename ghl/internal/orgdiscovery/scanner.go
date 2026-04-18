@@ -15,10 +15,11 @@ import (
 
 // Scanner discovers repositories in a GitHub organization via API.
 type Scanner struct {
-	org        string
-	token      string
-	client     *http.Client
-	apiBaseURL string // default: "https://api.github.com", override for tests
+	org            string
+	token          string
+	client         *http.Client
+	apiBaseURL     string // default: "https://api.github.com", override for tests
+	teamOverrides  map[string]string // manual repo→team overrides
 }
 
 // NewScanner creates a scanner for the given GitHub org.

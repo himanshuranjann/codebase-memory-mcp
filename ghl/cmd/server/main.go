@@ -148,6 +148,12 @@ func main() {
 		go func() {
 			orgName := cfg.GitHubAllowedOrgs[0]
 			scanner := orgdiscovery.NewScanner(orgName, orgScanToken)
+			// Load team overrides from file (if exists)
+			overrides := orgdiscovery.LoadTeamOverrides("/app/team-overrides.json")
+			if len(overrides) > 0 {
+				scanner.SetTeamOverrides(overrides)
+				slog.Info("background: loaded team overrides", "count", len(overrides))
+			}
 			slog.Info("background: scanning GitHub org for repo metadata", "org", orgName)
 
 			apiRepos, scanErr := scanner.ScanOrg(context.Background())
