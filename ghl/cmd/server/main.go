@@ -378,6 +378,26 @@ func main() {
 	})
 	idx := newFleetIndexer(indexPool, discoverySvc)
 
+	// ── Populate org.db from hydrated project .db files (runs once on startup) ──
+	if orgDB != nil {
+		go func() {
+			slog.Info("startup: populating org.db from hydrated project DBs")
+			if err := pipeline.PopulateOrgFromProjectDBs(context.Background(), orgDB, bridgePool, m.Repos); err != nil {
+				slog.Error("startup: org.db population failed", "err", err)
+			} else {
+				slog.Info("startup: org.db populated successfully")
+				// Persist to GCS immediately
+				if artifactSync != nil {
+					if n, err := artifactSync.PersistOrgGraph(); err != nil {
+						slog.Warn("startup: org.db GCS persist failed", "err", err)
+					} else {
+						slog.Info("startup: org.db persisted to GCS", "files", n)
+					}
+				}
+			}
+		}()
+	}
+
 	var fleetIndexing atomic.Bool
 	startFleetIndex := func(reason string, force bool) bool {
 		if !fleetIndexing.CompareAndSwap(false, true) {
