@@ -225,6 +225,8 @@ func main() {
 		githubToken: cfg.GitHubToken,
 	}
 
+	var orgRepoCount atomic.Int64 // tracks repos enriched for periodic GCS sync
+
 	newFleetIndexer := func(client indexer.Client, discoverySvc *discovery.Discoverer) *indexer.Indexer {
 		return indexer.New(indexer.Config{
 			Client:      client,
@@ -254,6 +256,15 @@ func main() {
 							slog.Warn("org enrichment failed", "repo", slug, "err", enrichErr)
 						} else {
 							slog.Info("org enrichment complete", "repo", slug)
+						}
+					}
+					// Persist org.db to GCS every 50 repos (survive container restarts)
+					count := orgRepoCount.Add(1)
+					if count%50 == 0 && artifactSync != nil {
+						if _, persistErr := artifactSync.PersistOrgGraph(); persistErr != nil {
+							slog.Warn("periodic org.db persist failed", "count", count, "err", persistErr)
+						} else {
+							slog.Info("periodic org.db persisted to GCS", "repos_enriched", count)
 						}
 					}
 				}
