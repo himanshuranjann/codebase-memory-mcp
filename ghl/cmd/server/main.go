@@ -382,7 +382,7 @@ func main() {
 	if orgDB != nil {
 		go func() {
 			slog.Info("startup: populating org.db from hydrated project DBs")
-			if err := pipeline.PopulateOrgFromProjectDBs(context.Background(), orgDB, bridgePool, m.Repos); err != nil {
+			if err := pipeline.PopulateOrgFromProjectDBs(context.Background(), orgDB, discoveryPool, m.Repos); err != nil {
 				slog.Error("startup: org.db population failed", "err", err)
 			} else {
 				slog.Info("startup: org.db populated successfully")
