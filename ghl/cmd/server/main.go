@@ -1082,10 +1082,13 @@ func (g *gitCloner) gitCommand(ctx context.Context, dir, githubURL string, args 
 
 func (g *gitCloner) restoreWorkingTree(ctx context.Context, githubURL, localPath, ref string) error {
 	// Remove stale index.lock left by crashed git processes — prevents permanent failure
-	lockPath := filepath.Join(localPath, ".git", "index.lock")
-	if _, err := os.Stat(lockPath); err == nil {
-		os.Remove(lockPath)
-		g.logger.Info("removed stale git index.lock", "path", lockPath)
+	// Remove stale lock files left by crashed git processes
+	for _, lockFile := range []string{"index.lock", "HEAD.lock", "config.lock"} {
+		lockPath := filepath.Join(localPath, ".git", lockFile)
+		if _, err := os.Stat(lockPath); err == nil {
+			os.Remove(lockPath)
+			g.logger.Info("removed stale git lock", "file", lockFile, "path", lockPath)
+		}
 	}
 	cmd := g.gitCommand(ctx, localPath, githubURL, "reset", "--hard", ref)
 	if out, err := cmd.CombinedOutput(); err != nil {
