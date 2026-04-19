@@ -4,6 +4,7 @@ package orgtools
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"sort"
 	"strings"
 	"sync"
@@ -278,6 +279,14 @@ func (s *OrgService) codeSearch(ctx context.Context, args map[string]interface{}
 	if err != nil {
 		return nil, fmt.Errorf("org_code_search: list repos: %w", err)
 	}
+	slog.Info("org_code_search: repos from org.db", "count", len(repos), "pattern", pattern)
+	if len(repos) > 0 {
+		sample := repos[0]
+		if len(repos) > 2 {
+			sample = repos[0] + "," + repos[1] + "," + repos[2]
+		}
+		slog.Info("org_code_search: sample repos", "repos", sample)
+	}
 	if len(repos) == 0 {
 		return []CodeSearchResult{}, nil
 	}
@@ -302,6 +311,13 @@ func (s *OrgService) codeSearch(ctx context.Context, args map[string]interface{}
 				"project": project,
 				"pattern": pattern,
 			})
+			// Debug: log what the bridge returned
+			if callErr != nil {
+				slog.Debug("org_code_search: bridge error", "project", project, "err", callErr)
+			} else if toolResult != nil && len(toolResult.Content) > 0 {
+				tl := len(toolResult.Content[0].Text)
+				slog.Debug("org_code_search: bridge result", "project", project, "text_len", tl, "preview", toolResult.Content[0].Text[:min(tl, 80)])
+			}
 
 			mu.Lock()
 			defer mu.Unlock()
