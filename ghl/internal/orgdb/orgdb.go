@@ -4,14 +4,18 @@ package orgdb
 import (
 	"database/sql"
 	"fmt"
+	"sync"
 
 	_ "modernc.org/sqlite"
 )
 
 // DB wraps a connection to the org.db SQLite database.
+// All writes are serialized via SetMaxOpenConns(1).
+// Checkpoint operations acquire an exclusive lock via mu.
 type DB struct {
 	db   *sql.DB
 	path string
+	mu   sync.RWMutex // protects checkpoint (write-lock) vs normal writes (read-lock)
 }
 
 // Open opens (or creates) the org.db at the given path and ensures the schema exists.
@@ -20,6 +24,9 @@ func Open(path string) (*DB, error) {
 	if err != nil {
 		return nil, fmt.Errorf("orgdb: open %s: %w", path, err)
 	}
+	// SQLite allows only one writer at a time. Serialize at Go level to avoid
+	// "database is locked" errors from 32 concurrent pipeline goroutines.
+	sqlDB.SetMaxOpenConns(1)
 	if err := sqlDB.Ping(); err != nil {
 		sqlDB.Close()
 		return nil, fmt.Errorf("orgdb: ping %s: %w", path, err)
@@ -38,6 +45,25 @@ func (d *DB) Close() error {
 		return nil
 	}
 	return d.db.Close()
+}
+
+// BeginTx starts a transaction. Use for atomic clear+insert sequences.
+func (d *DB) BeginTx() (*sql.Tx, error) {
+	return d.db.Begin()
+}
+
+// ExecTx runs a function within a transaction. If fn returns an error, the
+// transaction is rolled back; otherwise it commits.
+func (d *DB) ExecTx(fn func(tx *sql.Tx) error) error {
+	tx, err := d.db.Begin()
+	if err != nil {
+		return fmt.Errorf("orgdb: begin tx: %w", err)
+	}
+	if err := fn(tx); err != nil {
+		tx.Rollback()
+		return err
+	}
+	return tx.Commit()
 }
 
 // RepoRecord is the data for a single repo in the org graph.
@@ -87,9 +113,10 @@ func (d *DB) UpsertTeamOwnership(repoName, team, subTeam string) error {
 }
 
 // Checkpoint forces a WAL checkpoint, flushing all WAL data into the main database file.
-// This must be called before copying/persisting the .db file to ensure all data is
-// written to the main file (not stuck in the WAL journal).
+// Acquires an exclusive lock to prevent concurrent writes during checkpoint.
 func (d *DB) Checkpoint() error {
+	d.mu.Lock()
+	defer d.mu.Unlock()
 	_, err := d.db.Exec(`PRAGMA wal_checkpoint(TRUNCATE)`)
 	if err != nil {
 		return fmt.Errorf("orgdb: wal checkpoint: %w", err)

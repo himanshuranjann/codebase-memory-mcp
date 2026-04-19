@@ -90,10 +90,10 @@ func main() {
 		} else {
 			hydrated, err := artifactSync.Hydrate()
 			if err != nil {
-				slog.Error("failed to hydrate persisted indexes", "artifact_dir", cfg.ArtifactDir, "cache_dir", cfg.CBMCacheDir, "err", err)
-				os.Exit(1)
+				slog.Warn("failed to hydrate persisted indexes (continuing with empty cache)", "err", err)
+			} else {
+				slog.Info("hydrated persisted indexes", "count", hydrated, "artifact_dir", cfg.ArtifactDir, "cache_dir", cfg.CBMCacheDir)
 			}
-			slog.Info("hydrated persisted indexes", "count", hydrated, "artifact_dir", cfg.ArtifactDir, "cache_dir", cfg.CBMCacheDir)
 		}
 	}
 
@@ -468,6 +468,44 @@ func main() {
 		slog.Info("scheduled indexing enabled", "incremental_cron", cfg.IncrementalCron, "full_cron", cfg.FullCron)
 	} else {
 		slog.Info("scheduled indexing disabled")
+	}
+
+	// ── Periodic org.db sync (cross-instance consistency) ────
+	// Every 5 minutes, re-hydrate org.db from GCS if another instance updated it.
+	if orgDB != nil && artifactSync != nil {
+		orgDBPath := cfg.OrgDBPath
+		if orgDBPath == "" {
+			orgDBPath = filepath.Join(cfg.CBMCacheDir, "org", "org.db")
+		}
+		c.AddFunc("@every 5m", func() {
+			if orgPipelineRunning.Load() {
+				return // don't sync while pipeline is populating
+			}
+			hydrated, err := artifactSync.HydrateOrgGraph()
+			if err != nil {
+				slog.Warn("periodic org sync: hydration failed", "err", err)
+				return
+			}
+			if hydrated == 0 {
+				return
+			}
+			// Re-open to pick up hydrated data + ensure schema
+			orgDB.Close()
+			var dbErr error
+			newDB, dbErr := orgdb.Open(orgDBPath)
+			if dbErr != nil {
+				slog.Error("periodic org sync: re-open failed", "err", dbErr)
+				return
+			}
+			orgDB = newDB
+			slog.Info("periodic org sync: re-hydrated from GCS", "files", hydrated,
+				"repos", orgDB.RepoCount())
+		})
+		if !cfg.ScheduledIndexingEnabled {
+			c.Start()
+			defer c.Stop()
+		}
+		slog.Info("org.db periodic sync enabled (every 5m)")
 	}
 
 	// ── HTTP router ──────────────────────────────────────────

@@ -1,6 +1,7 @@
 package orgdb
 
 import (
+	"database/sql"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -82,33 +83,25 @@ func (d *DB) InferPackageProviders() (int, error) {
 // contract, event, deployment, and team_ownership tables.
 // It does NOT delete from the repos table (UpsertRepo handles that).
 func (d *DB) ClearRepoData(repoName string) error {
+	return d.ExecTx(func(tx *sql.Tx) error {
+		return clearRepoDataTx(tx, repoName)
+	})
+}
+
+// clearRepoDataTx runs the clear inside an existing transaction.
+func clearRepoDataTx(tx *sql.Tx, repoName string) error {
 	queries := []struct {
 		sql  string
 		args []any
 	}{
-		{
-			sql:  `DELETE FROM repo_dependencies WHERE repo_id IN (SELECT id FROM repos WHERE name = ?)`,
-			args: []any{repoName},
-		},
-		{
-			sql:  `DELETE FROM api_contracts WHERE provider_repo = ? OR consumer_repo = ?`,
-			args: []any{repoName, repoName},
-		},
-		{
-			sql:  `DELETE FROM event_contracts WHERE producer_repo = ? OR consumer_repo = ?`,
-			args: []any{repoName, repoName},
-		},
-		{
-			sql:  `DELETE FROM deployments WHERE repo_name = ?`,
-			args: []any{repoName},
-		},
-		{
-			sql:  `DELETE FROM team_ownership WHERE repo_name = ?`,
-			args: []any{repoName},
-		},
+		{`DELETE FROM repo_dependencies WHERE repo_id IN (SELECT id FROM repos WHERE name = ?)`, []any{repoName}},
+		{`DELETE FROM api_contracts WHERE provider_repo = ? OR consumer_repo = ?`, []any{repoName, repoName}},
+		{`DELETE FROM event_contracts WHERE producer_repo = ? OR consumer_repo = ?`, []any{repoName, repoName}},
+		{`DELETE FROM deployments WHERE repo_name = ?`, []any{repoName}},
+		{`DELETE FROM team_ownership WHERE repo_name = ?`, []any{repoName}},
 	}
 	for _, q := range queries {
-		if _, err := d.db.Exec(q.sql, q.args...); err != nil {
+		if _, err := tx.Exec(q.sql, q.args...); err != nil {
 			return fmt.Errorf("orgdb: clear repo data %q: %w", repoName, err)
 		}
 	}

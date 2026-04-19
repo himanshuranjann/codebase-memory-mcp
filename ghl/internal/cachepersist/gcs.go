@@ -123,6 +123,9 @@ func (b *gcsBackend) PersistProject(runtimeDir, project string) (int, error) {
 }
 
 func (b *gcsBackend) PersistOrgDB(runtimeDir string) (int, error) {
+	// After PRAGMA wal_checkpoint(TRUNCATE), all data is in the main .db file.
+	// Upload ONLY the .db file — not WAL/SHM — to ensure atomic consistency.
+	// Hydration restores just the .db and deletes any stale WAL files.
 	srcDir := filepath.Join(runtimeDir, "org")
 	entries, err := os.ReadDir(srcDir)
 	if err != nil {
@@ -134,14 +137,11 @@ func (b *gcsBackend) PersistOrgDB(runtimeDir string) (int, error) {
 	copied := 0
 	for _, entry := range entries {
 		name := entry.Name()
-		if entry.IsDir() {
+		if entry.IsDir() || !strings.HasSuffix(name, ".db") {
 			continue
 		}
-		// Persist .db files AND WAL journal files (.db-wal, .db-shm).
-		// Without the WAL, the .db may be empty when using WAL journal mode.
-		if !strings.HasSuffix(name, ".db") &&
-			!strings.HasSuffix(name, ".db-wal") &&
-			!strings.HasSuffix(name, ".db-shm") {
+		// Skip WAL/SHM journal files — only persist the main .db
+		if strings.HasSuffix(name, ".db-wal") || strings.HasSuffix(name, ".db-shm") {
 			continue
 		}
 		src := filepath.Join(srcDir, name)
@@ -168,6 +168,19 @@ func (b *gcsBackend) HydrateOrgDB(runtimeDir string) (int, error) {
 	if b.prefix != "" {
 		prefix = b.prefix + "/org/"
 	}
+
+	dstDir := filepath.Join(runtimeDir, "org")
+	if err := os.MkdirAll(dstDir, 0o750); err != nil {
+		return 0, fmt.Errorf("cachepersist: create org dir: %w", err)
+	}
+
+	// Delete any stale WAL/SHM files before restoring the .db.
+	// The persisted .db is self-contained (checkpoint was run before persist).
+	for _, suffix := range []string{"-wal", "-shm"} {
+		walPath := filepath.Join(dstDir, "org.db"+suffix)
+		os.Remove(walPath) // ignore error if file doesn't exist
+	}
+
 	query := &storage.Query{Prefix: prefix}
 	iter := b.client.Bucket(b.bucket).Objects(ctx, query)
 
@@ -184,21 +197,16 @@ func (b *gcsBackend) HydrateOrgDB(runtimeDir string) (int, error) {
 			continue
 		}
 		name := path.Base(attrs.Name)
-		// Restore .db files AND WAL journal files (.db-wal, .db-shm)
-		if !strings.HasSuffix(name, ".db") &&
-			!strings.HasSuffix(name, ".db-wal") &&
-			!strings.HasSuffix(name, ".db-shm") {
+		// Only restore .db files — WAL was flushed into .db before persist
+		if !strings.HasSuffix(name, ".db") ||
+			strings.HasSuffix(name, ".db-wal") ||
+			strings.HasSuffix(name, ".db-shm") {
 			continue
 		}
 
 		reader, err := b.client.Bucket(b.bucket).Object(attrs.Name).NewReader(ctx)
 		if err != nil {
 			return copied, fmt.Errorf("cachepersist: open gcs org object %s: %w", attrs.Name, err)
-		}
-		dstDir := filepath.Join(runtimeDir, "org")
-		if err := os.MkdirAll(dstDir, 0o750); err != nil {
-			_ = reader.Close()
-			return copied, fmt.Errorf("cachepersist: create org dir: %w", err)
 		}
 		err = copyReaderAtomic(reader, filepath.Join(dstDir, name), 0o640)
 		_ = reader.Close()
