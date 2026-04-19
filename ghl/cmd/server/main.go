@@ -559,12 +559,32 @@ func main() {
 			slog.Info("webhook: re-indexing repo", "repo", repoSlug)
 			if err := idx.IndexRepo(context.Background(), repo, false); err != nil {
 				slog.Error("webhook: index failed", "repo", repoSlug, "err", err)
+				return
+			}
+			// Persist .db to GCS (same as fleet OnRepoDone)
+			if artifactSync != nil {
+				projectName := projectNameFromPath(filepath.Join(cfg.CloneCacheDir, repoSlug))
+				if _, persistErr := artifactSync.PersistProject(projectName); persistErr != nil {
+					slog.Error("webhook: persist failed", "repo", repoSlug, "err", persistErr)
+				} else {
+					slog.Info("webhook: persisted", "repo", repoSlug)
+				}
+			}
+			// Org enrichment
+			if orgDB != nil && !orgPipelineRunning.Load() {
+				if enrichErr := pipeline.PopulateRepoData(orgDB, repo, cfg.CloneCacheDir); enrichErr != nil {
+					slog.Warn("webhook: org enrichment failed", "repo", repoSlug, "err", enrichErr)
+				}
+			}
+			if discoverySvc != nil {
+				discoverySvc.Invalidate()
 			}
 		},
 	})
 	r.Post("/webhooks/github", wh.ServeHTTP)
 
-	// Manual trigger: index a single repo by slug
+	// Manual trigger: index a single repo by slug.
+	// Runs the same persist + org enrichment as the fleet OnRepoDone callback.
 	r.Post("/index/{repoSlug}", requireAuth(func(w http.ResponseWriter, req *http.Request) {
 		slug := chi.URLParam(req, "repoSlug")
 		repo, ok := m.FindByName(slug)
@@ -575,7 +595,34 @@ func main() {
 		go func() {
 			if err := idx.IndexRepo(context.Background(), repo, true); err != nil {
 				slog.Error("manual index failed", "repo", slug, "err", err)
+				return
 			}
+			// Persist .db to GCS (same as fleet OnRepoDone)
+			if artifactSync != nil {
+				projectName := projectNameFromPath(filepath.Join(cfg.CloneCacheDir, slug))
+				persisted, persistErr := artifactSync.PersistProject(projectName)
+				if persistErr != nil {
+					slog.Error("manual index: persist failed", "repo", slug, "project", projectName, "err", persistErr)
+				} else {
+					slog.Info("manual index: persisted", "repo", slug, "project", projectName, "files", persisted)
+				}
+			}
+			// Org enrichment
+			if orgDB != nil && !orgPipelineRunning.Load() {
+				if enrichErr := pipeline.PopulateRepoData(orgDB, repo, cfg.CloneCacheDir); enrichErr != nil {
+					slog.Warn("manual index: org enrichment failed", "repo", slug, "err", enrichErr)
+				} else {
+					slog.Info("manual index: org enrichment complete", "repo", slug)
+				}
+				if artifactSync != nil {
+					orgDB.Checkpoint()
+					artifactSync.PersistOrgGraph()
+				}
+			}
+			if discoverySvc != nil {
+				discoverySvc.Invalidate()
+			}
+			slog.Info("manual index complete", "repo", slug)
 		}()
 		w.WriteHeader(http.StatusAccepted)
 		fmt.Fprintf(w, `{"accepted":true,"repo":%q}`, slug)
