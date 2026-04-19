@@ -139,11 +139,12 @@ func (d *DB) ContractCount() (apiContracts, eventContracts int) {
 }
 
 // TopReposByNodeCount returns the top N repo names ordered by node_count descending.
-// Repos with zero or NULL node_count are excluded.
+// Falls back to all repos if none have node_count populated.
 func (d *DB) TopReposByNodeCount(limit int) ([]string, error) {
 	if limit <= 0 {
 		limit = 20
 	}
+	// Try repos with node_count first (populated by list_projects pipeline)
 	rows, err := d.db.Query(`SELECT name FROM repos WHERE COALESCE(node_count, 0) > 0 ORDER BY node_count DESC LIMIT ?`, limit)
 	if err != nil {
 		return nil, fmt.Errorf("orgdb: top repos by node count: %w", err)
@@ -157,7 +158,26 @@ func (d *DB) TopReposByNodeCount(limit int) ([]string, error) {
 		}
 		names = append(names, name)
 	}
-	return names, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	// Fallback: if no repos have node_count, return all repos by name
+	if len(names) == 0 {
+		rows2, err := d.db.Query(`SELECT name FROM repos ORDER BY name LIMIT ?`, limit)
+		if err != nil {
+			return nil, fmt.Errorf("orgdb: fallback all repos: %w", err)
+		}
+		defer rows2.Close()
+		for rows2.Next() {
+			var name string
+			if err := rows2.Scan(&name); err != nil {
+				return nil, fmt.Errorf("orgdb: scan repo name: %w", err)
+			}
+			names = append(names, name)
+		}
+		return names, rows2.Err()
+	}
+	return names, nil
 }
 
 func (d *DB) ensureSchema() error {
