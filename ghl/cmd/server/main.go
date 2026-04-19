@@ -8,6 +8,7 @@ package main
 
 import (
 	"context"
+	"database/sql"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
@@ -266,6 +267,7 @@ func main() {
 						dst := filepath.Join(cfg.CBMCacheDir, projectName+".db")
 						if _, statErr := os.Stat(src); statErr == nil {
 							os.Rename(src, dst)
+							renameProjectInDB(dst, rawName, projectName)
 						}
 					}
 					persisted, persistErr := artifactSync.PersistProject(projectName)
@@ -583,6 +585,7 @@ func main() {
 					dst := filepath.Join(cfg.CBMCacheDir, projectName+".db")
 					if _, statErr := os.Stat(src); statErr == nil {
 						os.Rename(src, dst)
+							renameProjectInDB(dst, rawName, projectName)
 					}
 				}
 				if _, persistErr := artifactSync.PersistProject(projectName); persistErr != nil {
@@ -631,6 +634,7 @@ func main() {
 					dst := filepath.Join(cfg.CBMCacheDir, projectName+".db")
 					if _, statErr := os.Stat(src); statErr == nil {
 						os.Rename(src, dst)
+							renameProjectInDB(dst, rawName, projectName)
 					}
 				}
 				persisted, persistErr := artifactSync.PersistProject(projectName)
@@ -1033,6 +1037,24 @@ func loadConfig() config {
 		OrgDBPath:                getEnv("ORG_DB_PATH", ""),
 		GitHubOrgScanToken:      getEnv("GITHUB_ORG_SCAN_TOKEN", getEnv("GITHUB_TOKEN", "")),
 	}
+}
+
+// renameProjectInDB updates the internal project name in all SQLite tables
+// after the .db file has been renamed (e.g. from tmp-fleet-repos-X to data-fleet-cache-repos-X).
+func renameProjectInDB(dbPath, oldName, newName string) {
+	db, err := sql.Open("sqlite", dbPath+"?_pragma=busy_timeout(5000)")
+	if err != nil {
+		slog.Warn("renameProjectInDB: open failed", "path", dbPath, "err", err)
+		return
+	}
+	defer db.Close()
+	tables := []string{"projects", "nodes", "edges", "file_hashes"}
+	for _, table := range tables {
+		_, _ = db.Exec(fmt.Sprintf("UPDATE %s SET project = ? WHERE project = ?", table), newName, oldName)
+	}
+	// Also update the projects.name column (which is the primary key reference)
+	_, _ = db.Exec("UPDATE projects SET name = ? WHERE name = ?", newName, oldName)
+	slog.Info("renameProjectInDB: updated internal project name", "old", oldName, "new", newName)
 }
 
 func defaultManifestPath() string {
