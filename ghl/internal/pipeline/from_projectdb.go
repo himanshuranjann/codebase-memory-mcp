@@ -1,14 +1,8 @@
 // Package pipeline — PopulateFromProjectDB builds org.db using MCP tools only.
 //
-// 4 phases:
-//   Phase 1: list_projects → repo metadata + team ownership
-//   Phase 2a: search_graph(label=Route) → provider-side api_contracts
-//   Phase 2b: search_code(InternalRequest) → consumer-side api_contracts
-//   Phase 2c: search_code(@platform-core/) → package deps (repo_dependencies)
-//   Phase 3: CrossReferenceContracts → match consumers to providers
-//
-// IMPORTANT: Do NOT open project .db files from Go — this conflicts with the C binary
-// subprocesses and crashes the bridge pool. Use MCP tools only.
+// All extraction phases run with parallel worker pools for maximum speed.
+// Phase 1 is sequential (single list_projects call), phases 2a-2d run
+// concurrently with 8 workers each scanning projects in parallel.
 package pipeline
 
 import (
@@ -18,6 +12,8 @@ import (
 	"log/slog"
 	"regexp"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/GoHighLevel/codebase-memory-mcp/ghl/internal/manifest"
@@ -25,14 +21,16 @@ import (
 	"github.com/GoHighLevel/codebase-memory-mcp/ghl/internal/orgdb"
 )
 
+const pipelineWorkers = 8
+
 // MCPCaller is the interface for calling MCP tools on the C binary.
 type MCPCaller interface {
 	CallTool(ctx context.Context, name string, params map[string]interface{}) (*mcp.ToolResult, error)
 }
 
-// PopulateOrgFromProjectDBs builds org.db using MCP tools in 4 phases.
+// PopulateOrgFromProjectDBs builds org.db using MCP tools in parallel phases.
 func PopulateOrgFromProjectDBs(ctx context.Context, db *orgdb.DB, caller MCPCaller, repos []manifest.Repo, cbmCacheDir string) error {
-	// ── Phase 1: Repo metadata from list_projects ──
+	// ── Phase 1: Repo metadata from list_projects (single call) ──
 	result, err := caller.CallTool(ctx, "list_projects", nil)
 	if err != nil {
 		return fmt.Errorf("pipeline: list_projects: %w", err)
@@ -85,17 +83,38 @@ func PopulateOrgFromProjectDBs(ctx context.Context, db *orgdb.DB, caller MCPCall
 		slog.Info("after waiting", "projects", len(entries))
 	}
 
-	// ── Phase 2a: Extract routes → provider contracts ──
-	routeCount := extractRoutes(ctx, db, caller, entries)
+	// ── Phase 2: All extraction phases run in parallel ──
+	var routeCount, consumerCount, packageCount, eventCount int64
+	var wg sync.WaitGroup
+	wg.Add(4)
 
-	// ── Phase 2b: Extract InternalRequest calls → consumer contracts ──
-	consumerCount := extractConsumers(ctx, db, caller, entries)
+	go func() {
+		defer wg.Done()
+		n := extractRoutes(ctx, db, caller, entries)
+		atomic.StoreInt64(&routeCount, int64(n))
+	}()
+	go func() {
+		defer wg.Done()
+		n := extractConsumers(ctx, db, caller, entries)
+		atomic.StoreInt64(&consumerCount, int64(n))
+	}()
+	go func() {
+		defer wg.Done()
+		n := extractPackageDeps(ctx, db, caller, entries)
+		atomic.StoreInt64(&packageCount, int64(n))
+	}()
+	go func() {
+		defer wg.Done()
+		n := extractEventContracts(ctx, db, caller, entries)
+		atomic.StoreInt64(&eventCount, int64(n))
+	}()
 
-	// ── Phase 2c: Extract @platform-core package deps ──
-	packageCount := extractPackageDeps(ctx, db, caller, entries)
+	wg.Wait()
 
-	// ── Phase 2d: Extract event contracts ──
-	eventCount := extractEventContracts(ctx, db, caller, entries)
+	rc := atomic.LoadInt64(&routeCount)
+	cc := atomic.LoadInt64(&consumerCount)
+	pc := atomic.LoadInt64(&packageCount)
+	ec := atomic.LoadInt64(&eventCount)
 
 	// ── Phase 2e: Infer package providers from repo names ──
 	providerCount, provErr := db.InferPackageProviders()
@@ -107,7 +126,7 @@ func PopulateOrgFromProjectDBs(ctx context.Context, db *orgdb.DB, caller MCPCall
 
 	// ── Phase 3: Cross-reference contracts ──
 	matched := 0
-	if routeCount > 0 && consumerCount > 0 {
+	if rc > 0 && cc > 0 {
 		slog.Info("phase 3: cross-referencing API contracts")
 		var err error
 		matched, err = db.CrossReferenceContracts()
@@ -118,8 +137,7 @@ func PopulateOrgFromProjectDBs(ctx context.Context, db *orgdb.DB, caller MCPCall
 		}
 	}
 
-	// Cross-reference event contracts
-	if eventCount > 0 {
+	if ec > 0 {
 		eventMatched, err := db.CrossReferenceEventContracts()
 		if err != nil {
 			slog.Warn("cross-reference event contracts failed", "err", err)
@@ -129,46 +147,56 @@ func PopulateOrgFromProjectDBs(ctx context.Context, db *orgdb.DB, caller MCPCall
 	}
 
 	slog.Info("org.db fully populated",
-		"repos", len(entries), "routes", routeCount, "consumers", consumerCount,
-		"events", eventCount, "packages", packageCount, "cross_referenced", matched)
+		"repos", len(entries), "routes", rc, "consumers", cc,
+		"events", ec, "packages", pc, "cross_referenced", matched)
 	return nil
 }
 
-// extractRoutes calls search_graph(label=Route) per project and inserts provider contracts.
+// ── Parallel worker pool helper ──
+
+func parallelScan(entries []projEntry, workers int, fn func(entry projEntry)) {
+	ch := make(chan projEntry, len(entries))
+	for _, e := range entries {
+		ch <- e
+	}
+	close(ch)
+
+	var wg sync.WaitGroup
+	for i := 0; i < workers; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for entry := range ch {
+				fn(entry)
+			}
+		}()
+	}
+	wg.Wait()
+}
+
+// ── Phase 2a: Routes (parallel) ──
+
 func extractRoutes(ctx context.Context, db *orgdb.DB, caller MCPCaller, entries []projEntry) int {
-	slog.Info("phase 2a: extracting routes", "projects", len(entries))
-	routeCount, errorCount, consecutiveErrors := 0, 0, 0
+	slog.Info("phase 2a: extracting routes", "projects", len(entries), "workers", pipelineWorkers)
+	var count atomic.Int64
 
-	for i, entry := range entries {
-		if i > 0 {
-			time.Sleep(500 * time.Millisecond)
-		}
-
+	parallelScan(entries, pipelineWorkers, func(entry projEntry) {
 		result, err := caller.CallTool(ctx, "search_graph", map[string]interface{}{
 			"project": entry.projectName,
 			"label":   "Route",
 			"limit":   500,
 		})
 		if err != nil {
-			errorCount++
-			consecutiveErrors++
-			if consecutiveErrors >= 5 && routeCount == 0 {
-				slog.Warn("phase 2a: circuit breaker", "errors", errorCount)
-				break
-			}
-			continue
+			return
 		}
-		consecutiveErrors = 0
-
 		text := extractText(result)
 		if text == "" || text == "null" {
-			continue
+			return
 		}
 		var resp searchGraphResponse
 		if err := json.Unmarshal([]byte(text), &resp); err != nil {
-			continue
+			return
 		}
-
 		for _, node := range resp.Results {
 			method, path := parseRouteQualifiedName(node.QualifiedName)
 			if path == "" {
@@ -181,66 +209,42 @@ func extractRoutes(ctx context.Context, db *orgdb.DB, caller MCPCaller, entries 
 				ProviderSymbol: node.Name,
 				Confidence:     0.3,
 			})
-			routeCount++
+			count.Add(1)
 		}
+	})
 
-		if (i+1)%100 == 0 {
-			slog.Info("phase 2a progress", "processed", i+1, "routes", routeCount)
-		}
-	}
-	slog.Info("phase 2a complete", "routes", routeCount, "errors", errorCount)
-	return routeCount
+	n := int(count.Load())
+	slog.Info("phase 2a complete", "routes", n)
+	return n
 }
 
-// extractConsumers calls search_code(InternalRequest) + get_code_snippet per project
-// to find outbound service calls and insert consumer-side contracts.
+// ── Phase 2b: Consumers (parallel) ──
+
 func extractConsumers(ctx context.Context, db *orgdb.DB, caller MCPCaller, entries []projEntry) int {
-	slog.Info("phase 2b: extracting InternalRequest consumers", "projects", len(entries))
-	consumerCount, errorCount, consecutiveErrors := 0, 0, 0
+	slog.Info("phase 2b: extracting InternalRequest consumers", "projects", len(entries), "workers", pipelineWorkers)
+	var count atomic.Int64
 
-	for i, entry := range entries {
-		if i > 0 {
-			time.Sleep(500 * time.Millisecond)
-		}
-
-		// search_code finds functions containing "InternalRequest"
+	parallelScan(entries, pipelineWorkers, func(entry projEntry) {
 		result, err := caller.CallTool(ctx, "search_code", map[string]interface{}{
 			"project": entry.projectName,
 			"pattern": "InternalRequest",
 			"limit":   50,
 		})
 		if err != nil {
-			errorCount++
-			consecutiveErrors++
-			if consecutiveErrors >= 5 && consumerCount == 0 {
-				slog.Warn("phase 2b: circuit breaker", "errors", errorCount)
-				break
-			}
-			continue
+			return
 		}
-		consecutiveErrors = 0
-
 		text := extractText(result)
 		if text == "" || text == "null" {
-			continue
+			return
 		}
-
 		var codeResp searchCodeResponse
 		if err := json.Unmarshal([]byte(text), &codeResp); err != nil {
-			continue
+			return
 		}
-
-		// For each matching function, get the source code to extract service/route
 		for j, match := range codeResp.Results {
-			if j >= 10 {
-				break // limit get_code_snippet calls per project
-			}
-			if match.QualifiedName == "" {
+			if j >= 10 || match.QualifiedName == "" {
 				continue
 			}
-
-			time.Sleep(200 * time.Millisecond) // rate limit snippet calls
-
 			snippetResult, err := caller.CallTool(ctx, "get_code_snippet", map[string]interface{}{
 				"project":        entry.projectName,
 				"qualified_name": match.QualifiedName,
@@ -252,13 +256,10 @@ func extractConsumers(ctx context.Context, db *orgdb.DB, caller MCPCaller, entri
 			if snippetText == "" {
 				continue
 			}
-
-			// Parse the source code for InternalRequest.METHOD({serviceName, route})
 			var snippet codeSnippetResponse
 			if err := json.Unmarshal([]byte(snippetText), &snippet); err != nil {
 				continue
 			}
-
 			calls := parseInternalRequestCalls(snippet.Source)
 			for _, call := range calls {
 				db.InsertAPIContract(orgdb.APIContract{
@@ -268,29 +269,23 @@ func extractConsumers(ctx context.Context, db *orgdb.DB, caller MCPCaller, entri
 					ConsumerSymbol: match.Node,
 					Confidence:     0.5,
 				})
-				consumerCount++
+				count.Add(1)
 			}
 		}
+	})
 
-		if (i+1)%100 == 0 {
-			slog.Info("phase 2b progress", "processed", i+1, "consumers", consumerCount)
-		}
-	}
-	slog.Info("phase 2b complete", "consumers", consumerCount, "errors", errorCount)
-	return consumerCount
+	n := int(count.Load())
+	slog.Info("phase 2b complete", "consumers", n)
+	return n
 }
 
-// extractPackageDeps calls search_code(@platform-core/) per project to find package imports.
+// ── Phase 2c: Package deps (parallel) ──
+
 func extractPackageDeps(ctx context.Context, db *orgdb.DB, caller MCPCaller, entries []projEntry) int {
-	slog.Info("phase 2c: extracting package dependencies", "projects", len(entries))
-	packageCount, errorCount, consecutiveErrors := 0, 0, 0
+	slog.Info("phase 2c: extracting package dependencies", "projects", len(entries), "workers", pipelineWorkers)
+	var count atomic.Int64
 
-	for i, entry := range entries {
-		if i > 0 {
-			time.Sleep(500 * time.Millisecond)
-		}
-
-		// Search for GHL-internal package imports
+	parallelScan(entries, pipelineWorkers, func(entry projEntry) {
 		for _, scope := range []string{"@platform-core/", "@platform-ui/", "@gohighlevel/", "@frontend-core/"} {
 			result, err := caller.CallTool(ctx, "search_code", map[string]interface{}{
 				"project": entry.projectName,
@@ -298,37 +293,21 @@ func extractPackageDeps(ctx context.Context, db *orgdb.DB, caller MCPCaller, ent
 				"limit":   20,
 			})
 			if err != nil {
-				errorCount++
-				consecutiveErrors++
-				if consecutiveErrors >= 10 {
-					break
-				}
 				continue
 			}
-			consecutiveErrors = 0
-
 			text := extractText(result)
 			if text == "" || text == "null" {
 				continue
 			}
-
 			var codeResp searchCodeResponse
 			if err := json.Unmarshal([]byte(text), &codeResp); err != nil {
 				continue
 			}
-
-			// For each matching file, try to get the source to extract exact package names
 			seen := make(map[string]bool)
 			for j, match := range codeResp.Results {
-				if j >= 3 {
-					break // limit per scope
-				}
-				if match.QualifiedName == "" {
+				if j >= 3 || match.QualifiedName == "" {
 					continue
 				}
-
-				time.Sleep(200 * time.Millisecond)
-
 				snippetResult, err := caller.CallTool(ctx, "get_code_snippet", map[string]interface{}{
 					"project":        entry.projectName,
 					"qualified_name": match.QualifiedName,
@@ -340,12 +319,10 @@ func extractPackageDeps(ctx context.Context, db *orgdb.DB, caller MCPCaller, ent
 				if snippetText == "" {
 					continue
 				}
-
 				var snippet codeSnippetResponse
 				if err := json.Unmarshal([]byte(snippetText), &snippet); err != nil {
 					continue
 				}
-
 				pkgs := parsePackageImports(snippet.Source, scope)
 				for _, pkg := range pkgs {
 					if seen[pkg] {
@@ -358,17 +335,99 @@ func extractPackageDeps(ctx context.Context, db *orgdb.DB, caller MCPCaller, ent
 						Name:    pkg,
 						DepType: "dependencies",
 					})
-					packageCount++
+					count.Add(1)
 				}
 			}
 		}
+	})
 
-		if (i+1)%100 == 0 {
-			slog.Info("phase 2c progress", "processed", i+1, "packages", packageCount)
-		}
+	n := int(count.Load())
+	slog.Info("phase 2c complete", "packages", n)
+	return n
+}
+
+// ── Phase 2d: Event contracts (parallel) ──
+
+var (
+	consumerTopicRe = regexp.MustCompile(`@(?:Event|Message)Pattern\(\s*['"]([^'"]+)['"]`)
+	producerTopicRe = regexp.MustCompile(`(?:pubSub|this\.(?:pubSub|client|eventBus))\.(?:publish|emit|send)\(\s*['"]([^'"]+)['"]`)
+)
+
+func extractEventContracts(ctx context.Context, db *orgdb.DB, caller MCPCaller, entries []projEntry) int {
+	slog.Info("phase 2d: extracting event contracts", "projects", len(entries), "workers", pipelineWorkers)
+	var count atomic.Int64
+
+	searches := []struct {
+		query string
+		role  string
+		re    *regexp.Regexp
+	}{
+		{"EventPattern", "consumer", consumerTopicRe},
+		{"MessagePattern", "consumer", consumerTopicRe},
+		{"publish", "producer", producerTopicRe},
+		{"emit", "producer", producerTopicRe},
 	}
-	slog.Info("phase 2c complete", "packages", packageCount, "errors", errorCount)
-	return packageCount
+
+	parallelScan(entries, pipelineWorkers, func(entry projEntry) {
+		for _, search := range searches {
+			result, err := caller.CallTool(ctx, "search_graph", map[string]interface{}{
+				"project": entry.projectName,
+				"query":   search.query,
+				"limit":   20,
+			})
+			if err != nil {
+				continue
+			}
+			text := extractText(result)
+			if text == "" || text == "null" {
+				continue
+			}
+			var resp searchGraphResponse
+			if err := json.Unmarshal([]byte(text), &resp); err != nil {
+				continue
+			}
+			for j, node := range resp.Results {
+				if j >= 5 || node.QualifiedName == "" {
+					continue
+				}
+				snippetResult, err := caller.CallTool(ctx, "get_code_snippet", map[string]interface{}{
+					"project":        entry.projectName,
+					"qualified_name": node.QualifiedName,
+				})
+				if err != nil {
+					continue
+				}
+				snippetText := extractText(snippetResult)
+				if snippetText == "" {
+					continue
+				}
+				var snippet codeSnippetResponse
+				if err := json.Unmarshal([]byte(snippetText), &snippet); err != nil {
+					continue
+				}
+				topics := search.re.FindAllStringSubmatch(snippet.Source, -1)
+				for _, tm := range topics {
+					contract := orgdb.EventContract{
+						Topic:     tm[1],
+						EventType: "pubsub",
+					}
+					if search.role == "producer" {
+						contract.ProducerRepo = entry.repoName
+						contract.ProducerSymbol = node.Name
+					} else {
+						contract.ConsumerRepo = entry.repoName
+						contract.ConsumerSymbol = node.Name
+					}
+					db.InsertEventContract(contract)
+					count.Add(1)
+				}
+			}
+		}
+	})
+
+	n := int(count.Load())
+	slog.Info("phase 2d complete", "events", n)
+	return n
 }
 
 // ── Types ──
@@ -426,7 +485,6 @@ type internalCall struct {
 
 // ── Parsers ──
 
-// parseRouteQualifiedName extracts method and path from "__route__METHOD__path".
 func parseRouteQualifiedName(qn string) (string, string) {
 	const prefix = "__route__"
 	if !strings.HasPrefix(qn, prefix) {
@@ -445,24 +503,19 @@ func parseRouteQualifiedName(qn string) (string, string) {
 	return strings.ToUpper(method), path
 }
 
-// Regexes for extracting InternalRequest call components from source code.
 var (
 	irMethodRe      = regexp.MustCompile(`InternalRequest\.(get|post|put|delete|patch)\(`)
 	irServiceNameRe = regexp.MustCompile(`serviceName:\s*(?:SERVICE_NAME\.)?['"]?([A-Z][A-Z0-9_]+)`)
 	irRouteRe       = regexp.MustCompile("route:\\s*[`'\"]([^`'\"]+)")
+	templateExprRe  = regexp.MustCompile(`\$\{[^}]+\}`)
 )
 
-// parseInternalRequestCalls extracts service calls from source code.
-// Uses separate regexes for method, serviceName, and route since the object
-// literal can span multiple lines with template literals.
 func parseInternalRequestCalls(source string) []internalCall {
 	methodMatches := irMethodRe.FindAllStringSubmatchIndex(source, -1)
 	var calls []internalCall
 
 	for _, loc := range methodMatches {
 		method := source[loc[2]:loc[3]]
-
-		// Look for serviceName and route within the next 500 chars
 		end := loc[1] + 500
 		if end > len(source) {
 			end = len(source)
@@ -474,8 +527,7 @@ func parseInternalRequestCalls(source string) []internalCall {
 
 		if snMatch != nil && routeMatch != nil {
 			route := routeMatch[1]
-			// Strip template expressions like ${locationId}
-			route = regexp.MustCompile(`\$\{[^}]+\}`).ReplaceAllString(route, "*")
+			route = templateExprRe.ReplaceAllString(route, "*")
 			route = strings.TrimPrefix(route, "/")
 			if route != "" {
 				calls = append(calls, internalCall{
@@ -489,11 +541,9 @@ func parseInternalRequestCalls(source string) []internalCall {
 	return calls
 }
 
-// parsePackageImports finds @scope/name patterns in source code.
 func parsePackageImports(source, scope string) []string {
 	var pkgs []string
 	seen := make(map[string]bool)
-	// Match: from "@platform-core/base-service" or require("@platform-core/base-service")
 	re := regexp.MustCompile(regexp.QuoteMeta(scope) + `([a-zA-Z0-9_-]+)`)
 	matches := re.FindAllStringSubmatch(source, -1)
 	for _, m := range matches {
@@ -519,7 +569,6 @@ func stripProjectPrefix(name string) string {
 	return name
 }
 
-// waitForProjects polls list_projects until minCount projects are available or timeout.
 func waitForProjects(ctx context.Context, caller MCPCaller, db *orgdb.DB,
 	repoByName map[string]manifest.Repo, repos []manifest.Repo,
 	minCount int, timeout time.Duration) []projEntry {
@@ -527,7 +576,6 @@ func waitForProjects(ctx context.Context, caller MCPCaller, db *orgdb.DB,
 	deadline := time.Now().Add(timeout)
 	for time.Now().Before(deadline) {
 		time.Sleep(30 * time.Second)
-
 		result, err := caller.CallTool(ctx, "list_projects", nil)
 		if err != nil {
 			continue
@@ -536,7 +584,6 @@ func waitForProjects(ctx context.Context, caller MCPCaller, db *orgdb.DB,
 		if text == "" || text == "null" {
 			continue
 		}
-
 		var projects []projectInfo
 		if err := json.Unmarshal([]byte(text), &projects); err != nil {
 			var wrapped struct{ Projects []projectInfo }
@@ -545,29 +592,9 @@ func waitForProjects(ctx context.Context, caller MCPCaller, db *orgdb.DB,
 			}
 			projects = wrapped.Projects
 		}
-
 		slog.Info("waitForProjects: poll", "found", len(projects), "need", minCount)
-
 		if len(projects) >= minCount {
-			var entries []projEntry
-			for _, proj := range projects {
-				repoName := stripProjectPrefix(proj.Name)
-				repo, ok := repoByName[repoName]
-				if !ok {
-					repo = manifest.Repo{Name: repoName}
-				}
-				db.UpsertRepo(orgdb.RepoRecord{
-					Name:      repoName,
-					GitHubURL: repo.GitHubURL,
-					Team:      repo.Team,
-					Type:      repo.Type,
-					NodeCount: proj.Nodes,
-					EdgeCount: proj.Edges,
-				})
-				db.UpsertTeamOwnership(repoName, repo.Team, "")
-				entries = append(entries, projEntry{projectName: proj.Name, repoName: repoName})
-			}
-			return entries
+			return buildEntries(projects, db, repoByName)
 		}
 	}
 
@@ -581,6 +608,10 @@ func waitForProjects(ctx context.Context, caller MCPCaller, db *orgdb.DB,
 	if err := json.Unmarshal([]byte(text), &projects); err != nil {
 		return nil
 	}
+	return buildEntries(projects, db, repoByName)
+}
+
+func buildEntries(projects []projectInfo, db *orgdb.DB, repoByName map[string]manifest.Repo) []projEntry {
 	var entries []projEntry
 	for _, proj := range projects {
 		repoName := stripProjectPrefix(proj.Name)
@@ -597,108 +628,6 @@ func waitForProjects(ctx context.Context, caller MCPCaller, db *orgdb.DB,
 		entries = append(entries, projEntry{projectName: proj.Name, repoName: repoName})
 	}
 	return entries
-}
-
-// extractEventContracts scans each project for event patterns using two approaches:
-// 1. search_graph(query="EventPattern") — finds nodes whose names contain event patterns
-// 2. search_code + get_code_snippet fallback — finds decorator source code
-// Then extracts topics from the source code.
-func extractEventContracts(ctx context.Context, db *orgdb.DB, caller MCPCaller, entries []projEntry) int {
-	slog.Info("phase 2d: extracting event contracts", "projects", len(entries))
-	eventCount, errorCount := 0, 0
-
-	// Regexes to extract topics from source code
-	consumerTopicRe := regexp.MustCompile(`@(?:Event|Message)Pattern\(\s*['"]([^'"]+)['"]`)
-	producerTopicRe := regexp.MustCompile(`(?:pubSub|this\.(?:pubSub|client|eventBus))\.(?:publish|emit|send)\(\s*['"]([^'"]+)['"]`)
-
-	for i, entry := range entries {
-		if i > 0 {
-			time.Sleep(300 * time.Millisecond)
-		}
-
-		// Approach 1: search_graph with query text to find event-related nodes
-		for _, search := range []struct {
-			query string
-			role  string
-			re    *regexp.Regexp
-		}{
-			{"EventPattern", "consumer", consumerTopicRe},
-			{"MessagePattern", "consumer", consumerTopicRe},
-			{"publish", "producer", producerTopicRe},
-			{"emit", "producer", producerTopicRe},
-		} {
-			result, err := caller.CallTool(ctx, "search_graph", map[string]interface{}{
-				"project": entry.projectName,
-				"query":   search.query,
-				"limit":   20,
-			})
-			if err != nil {
-				errorCount++
-				continue
-			}
-
-			text := extractText(result)
-			if text == "" || text == "null" {
-				continue
-			}
-
-			var resp searchGraphResponse
-			if err := json.Unmarshal([]byte(text), &resp); err != nil {
-				continue
-			}
-
-			for j, node := range resp.Results {
-				if j >= 5 {
-					break
-				}
-				if node.QualifiedName == "" {
-					continue
-				}
-
-				time.Sleep(150 * time.Millisecond)
-
-				snippetResult, err := caller.CallTool(ctx, "get_code_snippet", map[string]interface{}{
-					"project":        entry.projectName,
-					"qualified_name": node.QualifiedName,
-				})
-				if err != nil {
-					continue
-				}
-				snippetText := extractText(snippetResult)
-				if snippetText == "" {
-					continue
-				}
-
-				var snippet codeSnippetResponse
-				if err := json.Unmarshal([]byte(snippetText), &snippet); err != nil {
-					continue
-				}
-
-				topics := search.re.FindAllStringSubmatch(snippet.Source, -1)
-				for _, tm := range topics {
-					contract := orgdb.EventContract{
-						Topic:     tm[1],
-						EventType: "pubsub",
-					}
-					if search.role == "producer" {
-						contract.ProducerRepo = entry.repoName
-						contract.ProducerSymbol = node.Name
-					} else {
-						contract.ConsumerRepo = entry.repoName
-						contract.ConsumerSymbol = node.Name
-					}
-					db.InsertEventContract(contract)
-					eventCount++
-				}
-			}
-		}
-
-		if (i+1)%100 == 0 {
-			slog.Info("phase 2d progress", "processed", i+1, "events", eventCount)
-		}
-	}
-	slog.Info("phase 2d complete", "events", eventCount, "errors", errorCount)
-	return eventCount
 }
 
 func extractText(result *mcp.ToolResult) string {
