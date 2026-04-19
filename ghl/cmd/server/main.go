@@ -1079,19 +1079,30 @@ func (g *gitCloner) EnsureClone(ctx context.Context, githubURL, localPath string
 		g.logger.Debug("updating clone", "path", localPath)
 		cmd := g.gitCommand(ctx, localPath, githubURL, "fetch", "--depth=1", "origin", "HEAD")
 		if out, err := cmd.CombinedOutput(); err != nil {
-			if isGitHubHTTPSAuthError(string(out)) {
+			outStr := string(out)
+			if isGitHubHTTPSAuthError(outStr) {
 				g.logger.Warn("git fetch auth failed, using existing clone", "path", localPath)
 				if err := g.restoreWorkingTree(ctx, githubURL, localPath, "HEAD"); err != nil {
 					return err
 				}
 				return g.validateClone(localPath)
 			}
-			return fmt.Errorf("git fetch: %w\n%s", err, out)
+			// Corrupt clone (e.g. "index file smaller than expected") — nuke and re-clone
+			if strings.Contains(outStr, "index file smaller") ||
+				strings.Contains(outStr, "bad signature") ||
+				strings.Contains(outStr, "index file corrupt") {
+				g.logger.Warn("corrupt git clone detected, removing for fresh clone", "path", localPath, "err", outStr)
+				os.RemoveAll(localPath)
+				// Fall through to fresh clone below
+			} else {
+				return fmt.Errorf("git fetch: %w\n%s", err, out)
+			}
+		} else {
+			if err := g.restoreWorkingTree(ctx, githubURL, localPath, "FETCH_HEAD"); err != nil {
+				return err
+			}
+			return g.validateClone(localPath)
 		}
-		if err := g.restoreWorkingTree(ctx, githubURL, localPath, "FETCH_HEAD"); err != nil {
-			return err
-		}
-		return g.validateClone(localPath)
 	}
 	// Fresh clone
 	if err := os.MkdirAll(localPath, 0750); err != nil {
