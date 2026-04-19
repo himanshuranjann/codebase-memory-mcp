@@ -594,7 +594,7 @@ func main() {
 		}
 		go func() {
 			slog.Info("manual index: starting", "repo", slug)
-			indexCtx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+			indexCtx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
 			defer cancel()
 			if err := idx.IndexRepo(indexCtx, repo, true); err != nil {
 				slog.Error("manual index failed", "repo", slug, "err", err)
@@ -1111,7 +1111,7 @@ func (g *gitCloner) EnsureClone(ctx context.Context, githubURL, localPath string
 	// Remove empty dir to allow clone into it
 	os.Remove(localPath)
 	g.logger.Info("cloning repo", "url", githubURL, "path", localPath)
-	cloneCtx, cancel := context.WithTimeout(ctx, 120*time.Second)
+	cloneCtx, cancel := context.WithTimeout(ctx, 15*time.Minute) // large monorepos need time on GCS Fuse
 	defer cancel()
 	cmd := g.gitCommand(cloneCtx, "", githubURL, "clone", "--depth=1", githubURL, localPath)
 	if out, err := cmd.CombinedOutput(); err != nil {
