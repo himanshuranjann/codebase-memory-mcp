@@ -39,6 +39,23 @@ func seedRepo(t *testing.T, db *orgdb.DB, name, team, typ string) {
 	}
 }
 
+// seedRepoWithNodeCount creates a repo with a specific node_count.
+func seedRepoWithNodeCount(t *testing.T, db *orgdb.DB, name, team, typ string, nodeCount int) {
+	t.Helper()
+	err := db.UpsertRepo(orgdb.RepoRecord{
+		Name:      name,
+		GitHubURL: "https://github.com/GoHighLevel/" + name + ".git",
+		Team:      team,
+		Type:      typ,
+		Languages: `["typescript"]`,
+		NodeCount: nodeCount,
+		EdgeCount: 5,
+	})
+	if err != nil {
+		t.Fatalf("UpsertRepo(%s): %v", name, err)
+	}
+}
+
 // newService creates an OrgService backed by a temp DB.
 func newService(t *testing.T) (*OrgService, *orgdb.DB) {
 	t.Helper()
@@ -46,9 +63,30 @@ func newService(t *testing.T) (*OrgService, *orgdb.DB) {
 	return New(db), db
 }
 
+// mockBridge is a test double for BridgeCaller.
+type mockBridge struct {
+	calls   []mockBridgeCall
+	handler func(name string, params map[string]interface{}) (*mcp.ToolResult, error)
+}
+
+type mockBridgeCall struct {
+	Name   string
+	Params map[string]interface{}
+}
+
+func (m *mockBridge) CallTool(_ context.Context, name string, params map[string]interface{}) (*mcp.ToolResult, error) {
+	m.calls = append(m.calls, mockBridgeCall{Name: name, Params: params})
+	if m.handler != nil {
+		return m.handler(name, params)
+	}
+	return &mcp.ToolResult{
+		Content: []mcp.Content{{Type: "text", Text: "No results found."}},
+	}, nil
+}
+
 // ---------- Definitions ----------
 
-func TestDefinitions_Returns5Tools(t *testing.T) {
+func TestDefinitions_Returns6Tools(t *testing.T) {
 	svc, _ := newService(t)
 	defs := svc.Definitions()
 	if len(defs) != 6 {
@@ -82,7 +120,7 @@ func TestIsOrgTool_KnownTools(t *testing.T) {
 	svc, _ := newService(t)
 	for _, name := range []string{
 		"org_dependency_graph", "org_blast_radius", "org_trace_flow",
-		"org_team_topology", "org_search",
+		"org_team_topology", "org_search", "org_code_search",
 	} {
 		if !svc.IsOrgTool(name) {
 			t.Errorf("IsOrgTool(%q) = false, want true", name)
@@ -349,6 +387,227 @@ func TestCallTool_Search_MissingArgs(t *testing.T) {
 	_, err := svc.CallTool(context.Background(), "org_search", map[string]interface{}{})
 	if err == nil {
 		t.Fatal("expected error for missing query")
+	}
+}
+
+// ---------- CallTool: org_code_search ----------
+
+func TestCallTool_CodeSearch_FansOut(t *testing.T) {
+	svc, db := newService(t)
+
+	// Seed 3 repos with different node counts
+	seedRepoWithNodeCount(t, db, "big-repo", "platform", "backend", 500)
+	seedRepoWithNodeCount(t, db, "medium-repo", "platform", "backend", 200)
+	seedRepoWithNodeCount(t, db, "small-repo", "platform", "backend", 50)
+
+	mb := &mockBridge{
+		handler: func(name string, params map[string]interface{}) (*mcp.ToolResult, error) {
+			project, _ := params["project"].(string)
+			if project == "data-fleet-cache-repos-big-repo" {
+				return &mcp.ToolResult{
+					Content: []mcp.Content{{Type: "text", Text: "found: Controller in big-repo"}},
+				}, nil
+			}
+			return &mcp.ToolResult{
+				Content: []mcp.Content{{Type: "text", Text: "No results found."}},
+			}, nil
+		},
+	}
+	svc.SetBridge(mb)
+
+	result, err := svc.CallTool(context.Background(), "org_code_search", map[string]interface{}{
+		"pattern": "@Controller",
+	})
+	if err != nil {
+		t.Fatalf("CallTool: %v", err)
+	}
+
+	results, ok := result.([]CodeSearchResult)
+	if !ok {
+		t.Fatalf("result type: got %T, want []CodeSearchResult", result)
+	}
+
+	// Should have 1 result (big-repo matched, others returned "No results found.")
+	if len(results) != 1 {
+		t.Fatalf("want 1 result, got %d: %+v", len(results), results)
+	}
+	if results[0].Project != "big-repo" {
+		t.Errorf("Project: got %q, want %q", results[0].Project, "big-repo")
+	}
+
+	// Verify the bridge was called 3 times (once per repo)
+	if len(mb.calls) != 3 {
+		t.Errorf("bridge calls: want 3, got %d", len(mb.calls))
+	}
+
+	// Verify @ was stripped from pattern
+	for _, call := range mb.calls {
+		pattern, _ := call.Params["pattern"].(string)
+		if pattern != "controller" { // lowercase because case_insensitive defaults to true
+			t.Errorf("pattern not normalized: got %q, want %q", pattern, "controller")
+		}
+	}
+}
+
+func TestCallTool_CodeSearch_CaseSensitive(t *testing.T) {
+	svc, db := newService(t)
+
+	seedRepoWithNodeCount(t, db, "test-repo", "team", "backend", 100)
+
+	mb := &mockBridge{
+		handler: func(name string, params map[string]interface{}) (*mcp.ToolResult, error) {
+			return &mcp.ToolResult{
+				Content: []mcp.Content{{Type: "text", Text: "No results found."}},
+			}, nil
+		},
+	}
+	svc.SetBridge(mb)
+
+	_, err := svc.CallTool(context.Background(), "org_code_search", map[string]interface{}{
+		"pattern":          "MyController",
+		"case_insensitive": false,
+	})
+	if err != nil {
+		t.Fatalf("CallTool: %v", err)
+	}
+
+	// Verify pattern was NOT lowercased
+	if len(mb.calls) != 1 {
+		t.Fatalf("bridge calls: want 1, got %d", len(mb.calls))
+	}
+	pattern, _ := mb.calls[0].Params["pattern"].(string)
+	if pattern != "MyController" {
+		t.Errorf("pattern: got %q, want %q", pattern, "MyController")
+	}
+}
+
+func TestCallTool_CodeSearch_MissingPattern(t *testing.T) {
+	svc, _ := newService(t)
+
+	_, err := svc.CallTool(context.Background(), "org_code_search", map[string]interface{}{})
+	if err == nil {
+		t.Fatal("expected error for missing pattern")
+	}
+}
+
+func TestCallTool_CodeSearch_NoBridge(t *testing.T) {
+	svc, db := newService(t)
+	seedRepoWithNodeCount(t, db, "test-repo", "team", "backend", 100)
+	// Don't set bridge
+
+	_, err := svc.CallTool(context.Background(), "org_code_search", map[string]interface{}{
+		"pattern": "test",
+	})
+	if err == nil {
+		t.Fatal("expected error when bridge not configured")
+	}
+}
+
+func TestCallTool_CodeSearch_NoRepos(t *testing.T) {
+	svc, _ := newService(t)
+	mb := &mockBridge{}
+	svc.SetBridge(mb)
+
+	result, err := svc.CallTool(context.Background(), "org_code_search", map[string]interface{}{
+		"pattern": "test",
+	})
+	if err != nil {
+		t.Fatalf("CallTool: %v", err)
+	}
+
+	results, ok := result.([]CodeSearchResult)
+	if !ok {
+		t.Fatalf("result type: got %T, want []CodeSearchResult", result)
+	}
+	if len(results) != 0 {
+		t.Errorf("want 0 results for empty org, got %d", len(results))
+	}
+	if len(mb.calls) != 0 {
+		t.Errorf("bridge calls: want 0, got %d", len(mb.calls))
+	}
+}
+
+func TestCallTool_CodeSearch_BridgeError(t *testing.T) {
+	svc, db := newService(t)
+	seedRepoWithNodeCount(t, db, "error-repo", "team", "backend", 100)
+
+	mb := &mockBridge{
+		handler: func(name string, params map[string]interface{}) (*mcp.ToolResult, error) {
+			return nil, fmt.Errorf("bridge timeout")
+		},
+	}
+	svc.SetBridge(mb)
+
+	result, err := svc.CallTool(context.Background(), "org_code_search", map[string]interface{}{
+		"pattern": "test",
+	})
+	if err != nil {
+		t.Fatalf("CallTool should not fail entirely: %v", err)
+	}
+
+	results, ok := result.([]CodeSearchResult)
+	if !ok {
+		t.Fatalf("result type: got %T", result)
+	}
+	if len(results) != 1 {
+		t.Fatalf("want 1 error result, got %d", len(results))
+	}
+	if !results[0].IsError {
+		t.Error("expected IsError=true for bridge failure")
+	}
+}
+
+func TestCallTool_CodeSearch_MaxReposCapped(t *testing.T) {
+	svc, db := newService(t)
+
+	// Seed 3 repos
+	seedRepoWithNodeCount(t, db, "repo-a", "team", "backend", 300)
+	seedRepoWithNodeCount(t, db, "repo-b", "team", "backend", 200)
+	seedRepoWithNodeCount(t, db, "repo-c", "team", "backend", 100)
+
+	mb := &mockBridge{
+		handler: func(name string, params map[string]interface{}) (*mcp.ToolResult, error) {
+			return &mcp.ToolResult{
+				Content: []mcp.Content{{Type: "text", Text: "No results found."}},
+			}, nil
+		},
+	}
+	svc.SetBridge(mb)
+
+	_, err := svc.CallTool(context.Background(), "org_code_search", map[string]interface{}{
+		"pattern":   "test",
+		"max_repos": float64(2),
+	})
+	if err != nil {
+		t.Fatalf("CallTool: %v", err)
+	}
+
+	// Should only search top 2 repos
+	if len(mb.calls) != 2 {
+		t.Errorf("bridge calls: want 2, got %d", len(mb.calls))
+	}
+}
+
+// ---------- NormalizePattern ----------
+
+func TestNormalizePattern_StripsAt(t *testing.T) {
+	got := NormalizePattern("@Controller", false)
+	if got != "Controller" {
+		t.Errorf("got %q, want %q", got, "Controller")
+	}
+}
+
+func TestNormalizePattern_CaseInsensitive(t *testing.T) {
+	got := NormalizePattern("@Controller", true)
+	if got != "controller" {
+		t.Errorf("got %q, want %q", got, "controller")
+	}
+}
+
+func TestNormalizePattern_NoAt(t *testing.T) {
+	got := NormalizePattern("handlePayment", false)
+	if got != "handlePayment" {
+		t.Errorf("got %q, want %q", got, "handlePayment")
 	}
 }
 

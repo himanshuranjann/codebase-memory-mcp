@@ -291,7 +291,9 @@ func (s *OrgService) codeSearch(ctx context.Context, args map[string]interface{}
 	var wg sync.WaitGroup
 	for _, repo := range repos {
 		wg.Add(1)
-		go func(project string) {
+		// The C binary expects project names with the "data-fleet-cache-repos-" prefix
+		projectName := "data-fleet-cache-repos-" + repo
+		go func(project, repoName string) {
 			defer wg.Done()
 			sem <- struct{}{}
 			defer func() { <-sem }()
@@ -305,27 +307,25 @@ func (s *OrgService) codeSearch(ctx context.Context, args map[string]interface{}
 			defer mu.Unlock()
 
 			if callErr != nil {
-				// Don't fail the whole search; record the error for this repo
 				results = append(results, CodeSearchResult{
-					Project: project,
+					Project: repoName,
 					Content: fmt.Sprintf("error: %v", callErr),
 					IsError: true,
 				})
 				return
 			}
 
-			// Extract text content from tool result
 			if toolResult != nil {
 				for _, c := range toolResult.Content {
 					if c.Text != "" && c.Text != "No results found." {
 						results = append(results, CodeSearchResult{
-							Project: project,
+							Project: repoName,
 							Content: c.Text,
 						})
 					}
 				}
 			}
-		}(repo)
+		}(projectName, repo)
 	}
 	wg.Wait()
 
