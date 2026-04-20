@@ -398,7 +398,7 @@ func main() {
 	slog.Info("discovery client pool started", "clients", cfg.DiscoveryClients)
 
 	var requestAuthenticator bridge.Authenticator
-	if cfg.GitHubAuthEnabled {
+	{ // Auth is always on — no env flag
 		requestAuthenticator = ghlauth.NewGitHubAuthenticator(ghlauth.GitHubConfig{
 			BaseURL:     cfg.GitHubAPIBaseURL,
 			AllowedOrgs: cfg.GitHubAllowedOrgs,
@@ -744,7 +744,7 @@ func main() {
 			"startup_index_enabled":    cfg.StartupIndexEnabled,
 			"scheduled_index_enabled":  cfg.ScheduledIndexingEnabled,
 			"fleet_index_running":      fleetIndexing.Load(),
-			"github_auth_enabled":      cfg.GitHubAuthEnabled,
+			"github_auth_enabled":      true,
 		})
 	}))
 
