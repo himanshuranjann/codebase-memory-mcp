@@ -549,6 +549,7 @@ func main() {
 	if orgDB != nil {
 		orgToolSvc = orgtools.New(orgDB)
 		orgToolSvc.SetBridge(bridgePool)
+		orgToolSvc.SetCacheDir(cfg.CBMCacheDir)
 		orgSyncCallback = func(db *orgdb.DB) { orgToolSvc.SetDB(db) }
 		slog.Info("org tools enabled", "tools", len(orgToolSvc.Definitions()))
 	}
