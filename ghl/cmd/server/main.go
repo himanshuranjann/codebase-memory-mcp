@@ -552,9 +552,13 @@ func main() {
 		slog.Info("org tools enabled", "tools", len(orgToolSvc.Definitions()))
 	}
 
+	// Search result cache — per-instance, 60 s TTL, 1000 entry max.
+	searchCache := bridge.NewSearchCache(1000, 60*time.Second)
+	slog.Info("search result cache enabled", "max_size", 1000, "ttl_s", 60)
+
 	// Bridge: forward MCP calls to the binary
 	bridgeHandler := bridge.NewHandler(
-		&mcpBridgeBackend{client: bridgePool, discovery: discoverySvc, orgTools: orgToolSvc},
+		&mcpBridgeBackend{client: bridgePool, discovery: discoverySvc, orgTools: orgToolSvc, cache: searchCache},
 		bridge.Config{BearerToken: cfg.BearerToken, Authenticator: requestAuthenticator},
 	)
 	r.Mount("/mcp", bridgeHandler)
@@ -1690,6 +1694,7 @@ type mcpBridgeBackend struct {
 	client    bridgeClient
 	discovery discovery.Service
 	orgTools  orgToolService
+	cache     *bridge.SearchCache
 }
 
 func (b *mcpBridgeBackend) Call(ctx context.Context, method string, params json.RawMessage) (json.RawMessage, error) {
@@ -1732,12 +1737,33 @@ func (b *mcpBridgeBackend) Call(ctx context.Context, method string, params json.
 			return b.callOrgTool(ctx, name, args)
 		}
 
+		// Cache check: return instantly for repeated identical queries.
+		cacheable := b.cache != nil && (name == "search_code" || name == "search_graph" || name == "get_code_snippet")
+		var cacheKey string
+		if cacheable {
+			cacheKey = b.cache.Key(name, args)
+			if cached, ok := b.cache.Get(cacheKey); ok {
+				slog.Debug("search cache hit", "tool", name)
+				return cached, nil
+			}
+		}
+
 		result, err := b.client.CallTool(ctx, name, args)
 		if err != nil {
 			return nil, err
 		}
 
-		return json.Marshal(result)
+		raw, err := json.Marshal(result)
+		if err != nil {
+			return nil, err
+		}
+
+		// Cache successful (non-error) results only.
+		if cacheable && !result.IsError {
+			b.cache.Set(cacheKey, raw)
+		}
+
+		return raw, nil
 	default:
 		return nil, bridge.ErrMethodNotFound
 	}
