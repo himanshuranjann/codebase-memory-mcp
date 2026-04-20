@@ -226,6 +226,16 @@ char *cbm_jsonrpc_format_error(int64_t id, int code, const char *message) {
  *  MCP PROTOCOL HELPERS
  * ══════════════════════════════════════════════════════════════════ */
 
+/* Emit a progress notification on stdout to keep the client connection alive.
+ * MCP spec (2025-03-26+): clients MAY reset their timeout on each progress. */
+static void emit_progress(int current, int total, const char *message) {
+    fprintf(stdout,
+        "{\"jsonrpc\":\"2.0\",\"method\":\"notifications/progress\","
+        "\"params\":{\"progress\":%d,\"total\":%d,\"message\":\"%s\"}}\n",
+        current, total, message);
+    fflush(stdout);
+}
+
 char *cbm_mcp_text_result(const char *text, bool is_error) {
     yyjson_mut_doc *doc = yyjson_mut_doc_new(NULL);
     yyjson_mut_val *root = yyjson_mut_obj(doc);
@@ -1972,10 +1982,12 @@ static char *get_project_root(cbm_mcp_server_t *srv, const char *project) {
 static char *handle_index_repository(cbm_mcp_server_t *srv, const char *args) {
     char *repo_path = cbm_mcp_get_string_arg(args, "repo_path");
     char *mode_str = cbm_mcp_get_string_arg(args, "mode");
+    char *project_override = cbm_mcp_get_string_arg(args, "project");
     cbm_normalize_path_sep(repo_path);
 
     if (!repo_path) {
         free(mode_str);
+        free(project_override);
         return cbm_mcp_text_result("repo_path is required", true);
     }
 
@@ -1988,6 +2000,12 @@ static char *handle_index_repository(cbm_mcp_server_t *srv, const char *args) {
     free(mode_str);
 
     cbm_pipeline_t *p = cbm_pipeline_new(repo_path, NULL, mode);
+    /* Override the project name if provided — ensures .db filename matches
+     * what the Go persist function expects (e.g. data-fleet-cache-repos-X). */
+    if (project_override && project_override[0] != '\0') {
+        cbm_pipeline_set_project_name(p, project_override);
+    }
+    free(project_override);
     if (!p) {
         free(repo_path);
         return cbm_mcp_text_result("failed to create pipeline", true);
@@ -2988,11 +3006,12 @@ static char *handle_search_code(cbm_mcp_server_t *srv, const char *args) {
         return cbm_mcp_text_result("search failed: temp file", true);
     }
 
-    /* No grep-level match limit — let grep find all matches, then dedup and
-     * cap in our code. The -m flag caused results from large vendored files
-     * to exhaust the quota before reaching project source files. */
-    enum { GREP_MAX_MATCHES = 500 };
-    int grep_limit = GREP_MAX_MATCHES;
+    /* Cap grep matches to 5x the requested limit to allow for dedup and
+     * ranking, but prevent unbounded memory on large repos. */
+    enum { GREP_MIN_MATCHES = 50, GREP_MAX_MATCHES = 500 };
+    int grep_limit = limit * 5;
+    if (grep_limit < GREP_MIN_MATCHES) grep_limit = GREP_MIN_MATCHES;
+    if (grep_limit > GREP_MAX_MATCHES) grep_limit = GREP_MAX_MATCHES;
 
     /* Scope grep to indexed files only — avoids scanning vendored/generated code.
      * Query the graph for distinct file paths, write them to a temp file,
@@ -3021,6 +3040,7 @@ static char *handle_search_code(cbm_mcp_server_t *srv, const char *args) {
     }
 
     /* Collect grep matches into array */
+    emit_progress(1, 3, "Scanning files with grep...");
     int gm_count = 0;
     grep_match_t *gm = collect_grep_matches(fp, root_path, strlen(root_path), has_path_filter,
                                             &path_regex, grep_limit, &gm_count);
@@ -3031,6 +3051,7 @@ static char *handle_search_code(cbm_mcp_server_t *srv, const char *args) {
     }
 
     /* ── Phase 2+3: Block expansion + graph ranking ──────────── */
+    emit_progress(2, 3, "Classifying and ranking matches...");
     /* Sort grep matches by file for contiguous processing.
      * Then: one SQL query per unique file for nodes, one batch query for all degrees. */
 
@@ -3186,8 +3207,10 @@ static char *handle_detect_changes(cbm_mcp_server_t *srv, const char *args) {
     /* resolve_store already called via get_project_root above */
     cbm_store_t *store = srv->store;
 
+    emit_progress(1, 3, "Running git diff...");
     char line[CBM_SZ_1K];
     int file_count = 0;
+    enum { MAX_CHANGED_FILES = 200, MAX_SYMBOL_FILES = 50 };
 
     while (fgets(line, sizeof(line), fp)) {
         size_t len = strlen(line);
@@ -3198,19 +3221,28 @@ static char *handle_detect_changes(cbm_mcp_server_t *srv, const char *args) {
             continue;
         }
 
-        yyjson_mut_arr_add_strcpy(doc, changed, line);
+        if (file_count < MAX_CHANGED_FILES) {
+            yyjson_mut_arr_add_strcpy(doc, changed, line);
+        }
         file_count++;
 
-        if (want_symbols) {
+        if (want_symbols && file_count <= MAX_SYMBOL_FILES) {
+            if (file_count % 10 == 0) {
+                char msg[128];
+                snprintf(msg, sizeof(msg), "Analyzing symbols: %d files processed", file_count);
+                emit_progress(2, 3, msg);
+            }
             detect_add_impacted_symbols(store, project, line, doc, impacted);
         }
     }
     cbm_pclose(fp);
 
+    emit_progress(3, 3, "Building response...");
     yyjson_mut_obj_add_val(doc, root_obj, "changed_files", changed);
     yyjson_mut_obj_add_int(doc, root_obj, "changed_count", file_count);
     yyjson_mut_obj_add_val(doc, root_obj, "impacted_symbols", impacted);
     yyjson_mut_obj_add_int(doc, root_obj, "depth", depth);
+    yyjson_mut_obj_add_bool(doc, root_obj, "has_more", file_count > MAX_CHANGED_FILES);
 
     char *json = yy_doc_to_str(doc);
     yyjson_mut_doc_free(doc);

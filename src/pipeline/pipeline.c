@@ -150,6 +150,12 @@ const char *cbm_pipeline_project_name(const cbm_pipeline_t *p) {
     return p ? p->project_name : NULL;
 }
 
+void cbm_pipeline_set_project_name(cbm_pipeline_t *p, const char *name) {
+    if (!p || !name) return;
+    free(p->project_name);
+    p->project_name = strdup(name);
+}
+
 const char *cbm_pipeline_repo_path(const cbm_pipeline_t *p) {
     return p ? p->repo_path : NULL;
 }

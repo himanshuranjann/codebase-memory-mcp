@@ -3,6 +3,7 @@ package indexer_test
 import (
 	"context"
 	"errors"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -19,7 +20,7 @@ type fakeClient struct {
 	callDuration time.Duration
 }
 
-func (f *fakeClient) IndexRepository(ctx context.Context, repoPath, mode string) error {
+func (f *fakeClient) IndexRepository(ctx context.Context, repoPath, mode, projectName string) error {
 	f.indexCalls.Add(1)
 	if f.callDuration > 0 {
 		select {
@@ -262,6 +263,37 @@ func TestIndexer_EmptyRepoList(t *testing.T) {
 	}
 }
 
+func TestIndexer_IndexAll_CallsOnAllComplete(t *testing.T) {
+	var gotResult indexer.IndexResult
+	called := false
+
+	client := &fakeClient{}
+	cloner := &fakeCloner{}
+	idx := indexer.New(indexer.Config{
+		Client:      client,
+		Cloner:      cloner,
+		CacheDir:    t.TempDir(),
+		Concurrency: 2,
+		OnAllComplete: func(result indexer.IndexResult) {
+			called = true
+			gotResult = result
+		},
+	})
+
+	repos := sampleRepos(3)
+	idx.IndexAll(context.Background(), repos, false)
+
+	if !called {
+		t.Fatal("OnAllComplete was not called")
+	}
+	if gotResult.Total != 3 {
+		t.Errorf("Total: got %d, want 3", gotResult.Total)
+	}
+	if gotResult.Succeeded != 3 {
+		t.Errorf("Succeeded: got %d, want 3", gotResult.Succeeded)
+	}
+}
+
 func TestIndexer_LocalCachePath(t *testing.T) {
 	cacheDir := t.TempDir()
 	var capturedPath string
@@ -290,5 +322,154 @@ func TestIndexer_LocalCachePath(t *testing.T) {
 	expected := cacheDir + "/membership-backend"
 	if capturedPath != expected {
 		t.Errorf("clone path: want %q, got %q", expected, capturedPath)
+	}
+}
+
+// ── Activity checker tests ──────────────────────────────────────
+
+type fakeActivityChecker struct {
+	activeRepos map[string]bool
+}
+
+func (f *fakeActivityChecker) IsActive(_ context.Context, repoName string) bool {
+	return f.activeRepos[repoName]
+}
+
+func TestIndexer_IndexAll_SkipsInactiveRepos(t *testing.T) {
+	client := &fakeClient{}
+	cloner := &fakeCloner{}
+	repos := sampleRepos(5) // repo-a through repo-e
+
+	checker := &fakeActivityChecker{
+		activeRepos: map[string]bool{
+			"repo-a": true,
+			"repo-c": true,
+			// repo-b, repo-d, repo-e are stale
+		},
+	}
+
+	idx := indexer.New(indexer.Config{
+		Client:          client,
+		Cloner:          cloner,
+		CacheDir:        t.TempDir(),
+		Concurrency:     2,
+		ActivityChecker: checker,
+	})
+
+	result := idx.IndexAll(context.Background(), repos, false)
+
+	if result.Total != 5 {
+		t.Errorf("Total: want 5, got %d", result.Total)
+	}
+	if result.Succeeded != 2 {
+		t.Errorf("Succeeded: want 2, got %d", result.Succeeded)
+	}
+	if result.Skipped != 3 {
+		t.Errorf("Skipped: want 3, got %d", result.Skipped)
+	}
+	if result.Failed != 0 {
+		t.Errorf("Failed: want 0, got %d", result.Failed)
+	}
+	if client.indexCalls.Load() != 2 {
+		t.Errorf("IndexRepository calls: want 2, got %d", client.indexCalls.Load())
+	}
+}
+
+func TestIndexer_IndexAll_ForceIgnoresActivityChecker(t *testing.T) {
+	client := &fakeClient{}
+	cloner := &fakeCloner{}
+	repos := sampleRepos(3)
+
+	checker := &fakeActivityChecker{
+		activeRepos: map[string]bool{}, // all repos are "stale"
+	}
+
+	idx := indexer.New(indexer.Config{
+		Client:          client,
+		Cloner:          cloner,
+		CacheDir:        t.TempDir(),
+		Concurrency:     2,
+		ActivityChecker: checker,
+	})
+
+	result := idx.IndexAll(context.Background(), repos, true) // force=true
+
+	if result.Succeeded != 3 {
+		t.Errorf("Succeeded: want 3 (force=true overrides activity check), got %d", result.Succeeded)
+	}
+	if result.Skipped != 0 {
+		t.Errorf("Skipped: want 0, got %d", result.Skipped)
+	}
+}
+
+// ── Project name func tests ────────────────────────────────────
+
+type projectNameCapture struct {
+	fakeClient
+	capturedNames []string
+	mu            sync.Mutex
+}
+
+func (p *projectNameCapture) IndexRepository(ctx context.Context, repoPath, mode, projectName string) error {
+	p.mu.Lock()
+	p.capturedNames = append(p.capturedNames, projectName)
+	p.mu.Unlock()
+	return p.fakeClient.IndexRepository(ctx, repoPath, mode, projectName)
+}
+
+func TestIndexer_IndexRepo_PassesProjectName(t *testing.T) {
+	client := &projectNameCapture{}
+	cloner := &fakeCloner{}
+
+	idx := indexer.New(indexer.Config{
+		Client:   client,
+		Cloner:   cloner,
+		CacheDir: "/tmp/fleet-repos",
+		ProjectNameFunc: func(slug string) string {
+			return "data-fleet-cache-repos-" + slug
+		},
+		Concurrency: 1,
+	})
+
+	repo := manifest.Repo{
+		Name:      "membership-backend",
+		GitHubURL: "https://github.com/GoHighLevel/membership-backend",
+	}
+
+	if err := idx.IndexRepo(context.Background(), repo, false); err != nil {
+		t.Fatalf("IndexRepo: %v", err)
+	}
+
+	if len(client.capturedNames) != 1 {
+		t.Fatalf("expected 1 project name, got %d", len(client.capturedNames))
+	}
+	if client.capturedNames[0] != "data-fleet-cache-repos-membership-backend" {
+		t.Errorf("project name: want %q, got %q", "data-fleet-cache-repos-membership-backend", client.capturedNames[0])
+	}
+}
+
+func TestIndexer_IndexRepo_EmptyProjectNameWhenNoFunc(t *testing.T) {
+	client := &projectNameCapture{}
+	cloner := &fakeCloner{}
+
+	idx := indexer.New(indexer.Config{
+		Client:      client,
+		Cloner:      cloner,
+		CacheDir:    t.TempDir(),
+		Concurrency: 1,
+		// ProjectNameFunc is nil
+	})
+
+	repo := manifest.Repo{
+		Name:      "membership-backend",
+		GitHubURL: "https://github.com/GoHighLevel/membership-backend",
+	}
+
+	if err := idx.IndexRepo(context.Background(), repo, false); err != nil {
+		t.Fatalf("IndexRepo: %v", err)
+	}
+
+	if len(client.capturedNames) != 1 || client.capturedNames[0] != "" {
+		t.Errorf("project name: want empty, got %q", client.capturedNames[0])
 	}
 }

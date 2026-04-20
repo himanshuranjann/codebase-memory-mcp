@@ -320,7 +320,19 @@ static int configure_pragmas(cbm_store_t *s, bool in_memory) {
         if (rc != CBM_STORE_OK) {
             return rc;
         }
-        rc = exec_sql(s, "PRAGMA mmap_size = 67108864;"); /* CBM_SZ_64 MB */
+        {
+            const char *mmap_val = getenv("CBM_MMAP_SIZE");
+            if (mmap_val && mmap_val[0] != '\0') {
+                char pragma_buf[80];
+                snprintf(pragma_buf, sizeof(pragma_buf), "PRAGMA mmap_size = %s;", mmap_val);
+                rc = exec_sql(s, pragma_buf);
+            } else {
+                rc = exec_sql(s, "PRAGMA mmap_size = 67108864;"); /* CBM_SZ_64 MB */
+            }
+        }
+        /* Keep temp tables on disk to avoid memory spikes on large queries */
+        exec_sql(s, "PRAGMA temp_store = FILE;");
+        exec_sql(s, "PRAGMA cache_size = -2000;"); /* 2MB page cache */
     }
     return rc;
 }
@@ -499,6 +511,15 @@ static int store_authorizer(void *user_data, int action, const char *p3, const c
 }
 
 static cbm_store_t *store_open_internal(const char *path, bool in_memory) {
+    /* Soft heap limit: SQLite tries to release cache pages when exceeded.
+     * No hard limit — large repos (140K+ nodes) need >512MB during indexing.
+     * PRAGMA temp_store=FILE handles the memory pressure instead. */
+    static int limits_set = 0;
+    if (!limits_set) {
+        sqlite3_soft_heap_limit64(512LL * 1024 * 1024);
+        limits_set = 1;
+    }
+
     cbm_store_t *s = calloc(CBM_ALLOC_ONE, sizeof(cbm_store_t));
     if (!s) {
         return NULL;

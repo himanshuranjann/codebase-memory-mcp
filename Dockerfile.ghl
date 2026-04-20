@@ -56,9 +56,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 COPY --from=cbm   /usr/local/bin/codebase-memory-mcp /app/codebase-memory-mcp
 COPY --from=build /app/ghl-fleet                      /app/ghl-fleet
 
-# Copy default manifest
+# Copy default manifest and team overrides
 COPY REPOS.yaml /app/REPOS.yaml
 COPY REPOS.local.yaml /app/REPOS.local.yaml
+COPY ghl/team-overrides.json /app/team-overrides.json
 
 # Git: trust all dirs (needed when running as non-root in containers)
 RUN git config --global --add safe.directory '*'
@@ -67,10 +68,12 @@ WORKDIR /app
 
 # ── Defaults (all overridable via env) ───────────────────────────
 ENV PORT=8080 \
+    CBM_MMAP_SIZE=0 \
     CBM_BINARY=/app/codebase-memory-mcp \
     CBM_CACHE_DIR=/tmp/codebase-memory-mcp \
     CBM_ARTIFACT_DIR=/data/fleet-cache/indexes \
-    FLEET_CACHE_DIR=/data/fleet-cache/repos \
+    FLEET_CACHE_DIR=/tmp/fleet-repos \
+    PROJECT_NAME_PREFIX=data-fleet-cache-repos \
     REPOS_MANIFEST=/app/REPOS.local.yaml \
     BRIDGE_CLIENTS=4 \
     BRIDGE_ACQUIRE_TIMEOUT_MS=1500 \

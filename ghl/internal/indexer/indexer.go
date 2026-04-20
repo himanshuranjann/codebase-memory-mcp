@@ -12,7 +12,16 @@ import (
 
 // Client is the interface for calling the codebase-memory-mcp binary.
 type Client interface {
-	IndexRepository(ctx context.Context, repoPath, mode string) error
+	// IndexRepository indexes a repository. If projectName is non-empty, the
+	// C binary uses it as the internal project name instead of deriving one
+	// from repoPath.
+	IndexRepository(ctx context.Context, repoPath, mode, projectName string) error
+}
+
+// ActivityChecker determines whether a repo has recent activity.
+// Used during fleet indexing to skip stale repos.
+type ActivityChecker interface {
+	IsActive(ctx context.Context, repoName string) bool
 }
 
 // Cloner is the interface for ensuring a local clone of a repository exists.
@@ -25,6 +34,7 @@ type IndexResult struct {
 	Total     int
 	Succeeded int
 	Failed    int
+	Skipped   int // repos skipped due to inactivity
 	Errors    []RepoError
 }
 
@@ -41,10 +51,21 @@ type Config struct {
 	CacheDir    string // local directory where repos are cloned
 	Concurrency int    // max parallel indexing goroutines (default: 5)
 
+	// ProjectNameFunc computes the project name to pass to the C binary.
+	// When set, the returned name is used as the internal project identifier
+	// instead of the path-derived default. If nil or returns "", the C binary
+	// derives the name from the filesystem path.
+	ProjectNameFunc func(repoSlug string) string
+
+	// ActivityChecker, if set, is consulted during IndexAll. Repos for which
+	// IsActive returns false are skipped (unless force=true).
+	ActivityChecker ActivityChecker
+
 	// Optional callbacks for observability / testing.
 	OnRepoStart func(repoSlug string)
 	OnRepoDone  func(repoSlug string, err error)
-	OnClone     func(githubURL, localPath string)
+	OnClone       func(githubURL, localPath string)
+	OnAllComplete func(result IndexResult)
 }
 
 // Indexer manages cloning and indexing a fleet of repositories.
@@ -81,6 +102,14 @@ func (i *Indexer) IndexAll(ctx context.Context, repos []manifest.Repo, force boo
 	var wg sync.WaitGroup
 
 	for _, repo := range repos {
+		// Activity check: skip stale repos unless forced
+		if !force && i.cfg.ActivityChecker != nil {
+			if !i.cfg.ActivityChecker.IsActive(ctx, repo.Name) {
+				result.Skipped++
+				continue
+			}
+		}
+
 		// Check context before dispatching
 		select {
 		case <-ctx.Done():
@@ -119,10 +148,15 @@ func (i *Indexer) IndexAll(ctx context.Context, repos []manifest.Repo, force boo
 		}
 	}
 
+	if i.cfg.OnAllComplete != nil {
+		i.cfg.OnAllComplete(result)
+	}
+
 	return result
 }
 
 // IndexRepo clones (or updates) a single repo and triggers indexing.
+// The project name is computed from Config.ProjectNameFunc if set.
 func (i *Indexer) IndexRepo(ctx context.Context, repo manifest.Repo, force bool) error {
 	localPath := filepath.Join(i.cfg.CacheDir, repo.Name)
 
@@ -140,7 +174,11 @@ func (i *Indexer) IndexRepo(ctx context.Context, repo manifest.Repo, force bool)
 	if force {
 		mode = "full"
 	}
-	if err := i.cfg.Client.IndexRepository(ctx, localPath, mode); err != nil {
+	projectName := ""
+	if i.cfg.ProjectNameFunc != nil {
+		projectName = i.cfg.ProjectNameFunc(repo.Name)
+	}
+	if err := i.cfg.Client.IndexRepository(ctx, localPath, mode, projectName); err != nil {
 		return fmt.Errorf("indexer: index %q: %w", repo.Name, err)
 	}
 

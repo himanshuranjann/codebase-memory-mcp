@@ -13,7 +13,7 @@
 #include "foundation/constants.h"
 
 #define MAX_RAM_FRACTION 1.0
-#define DEFAULT_RAM_FRACTION 0.5
+#define DEFAULT_RAM_FRACTION 0.9
 #include <mimalloc.h>
 #include <stdatomic.h>
 #include <stdio.h>

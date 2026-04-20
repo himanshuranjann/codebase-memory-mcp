@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 	"os/exec"
 	"sync"
 	"sync/atomic"
@@ -98,6 +99,23 @@ func NewClient(ctx context.Context, binPath string) (*Client, error) {
 	if err != nil {
 		return nil, fmt.Errorf("mcp: stdout pipe: %w", err)
 	}
+	// Capture stderr for crash diagnostics
+	stderrPipe, err := cmd.StderrPipe()
+	if err != nil {
+		return nil, fmt.Errorf("mcp: stderr pipe: %w", err)
+	}
+	go func() {
+		stderrBuf := make([]byte, 4096)
+		for {
+			n, readErr := stderrPipe.Read(stderrBuf)
+			if n > 0 {
+				slog.Warn("mcp binary stderr", "output", string(stderrBuf[:n]))
+			}
+			if readErr != nil {
+				break
+			}
+		}
+	}()
 
 	if err := cmd.Start(); err != nil {
 		return nil, fmt.Errorf("mcp: start binary %q: %w", binPath, err)
@@ -108,8 +126,9 @@ func NewClient(ctx context.Context, binPath string) (*Client, error) {
 		stdin:  stdin,
 		reader: bufio.NewScanner(stdout),
 	}
-	// Increase scanner buffer for large responses (e.g. index_repository results)
-	c.reader.Buffer(make([]byte, 4*1024*1024), 4*1024*1024)
+	// Large monorepos (92K+ nodes) can produce responses >4MB.
+	// 64MB buffer handles even the largest projects.
+	c.reader.Buffer(make([]byte, 64*1024*1024), 64*1024*1024)
 
 	if err := c.initialize(ctx); err != nil {
 		_ = cmd.Process.Kill()
