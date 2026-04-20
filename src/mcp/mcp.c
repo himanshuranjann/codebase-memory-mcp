@@ -1999,7 +1999,12 @@ static char *handle_index_repository(cbm_mcp_server_t *srv, const char *args) {
     }
     free(mode_str);
 
-    cbm_pipeline_t *p = cbm_pipeline_new(repo_path, project_override, mode);
+    cbm_pipeline_t *p = cbm_pipeline_new(repo_path, NULL, mode);
+    /* Override the project name if provided — ensures .db filename matches
+     * what the Go persist function expects (e.g. data-fleet-cache-repos-X). */
+    if (project_override && project_override[0] != '\0') {
+        cbm_pipeline_set_project_name(p, project_override);
+    }
     free(project_override);
     if (!p) {
         free(repo_path);
