@@ -8,7 +8,6 @@ package main
 
 import (
 	"context"
-	"database/sql"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
@@ -245,13 +244,28 @@ func main() {
 	var orgRepoCount atomic.Int64    // tracks repos enriched for periodic GCS sync
 	var orgPipelineRunning atomic.Bool // true while startup pipeline is populating org.db
 
+	// activityChecker filters stale repos during fleet runs.
+	var actChecker indexer.ActivityChecker
+	if cfg.GitHubToken != "" {
+		actChecker = &githubActivityChecker{
+			token:   cfg.GitHubToken,
+			baseURL: cfg.GitHubAPIBaseURL,
+			org:     firstOrg(cfg.GitHubAllowedOrgs),
+			days:    7,
+		}
+	}
+
 	newFleetIndexer := func(client indexer.Client, discoverySvc *discovery.Discoverer) *indexer.Indexer {
 		return indexer.New(indexer.Config{
 			Client:      client,
 			Cloner:      cloner,
 			CacheDir:    cfg.CloneCacheDir,
 			Concurrency: cfg.Concurrency,
-			OnRepoStart: func(slug string) { slog.Info("indexing repo", "repo", slug) },
+			ProjectNameFunc: func(repoSlug string) string {
+				return projectNameFromPath(filepath.Join(cfg.CloneCacheDir, repoSlug))
+			},
+			ActivityChecker: actChecker,
+			OnRepoStart:     func(slug string) { slog.Info("indexing repo", "repo", slug) },
 			OnRepoDone: func(slug string, err error) {
 				if err != nil {
 					slog.Error("repo indexing failed", "repo", slug, "err", err)
@@ -260,16 +274,6 @@ func main() {
 				if artifactSync != nil {
 					clonePath := filepath.Join(cfg.CloneCacheDir, slug)
 					projectName := projectNameFromPath(clonePath)
-					rawName := rawProjectNameFromPath(clonePath)
-					// If prefix override changes the name, rename the .db so PersistProject finds it
-					if rawName != projectName {
-						src := filepath.Join(cfg.CBMCacheDir, rawName+".db")
-						dst := filepath.Join(cfg.CBMCacheDir, projectName+".db")
-						if _, statErr := os.Stat(src); statErr == nil {
-							os.Rename(src, dst)
-							renameProjectInDB(dst, rawName, projectName)
-						}
-					}
 					persisted, persistErr := artifactSync.PersistProject(projectName)
 					if persistErr != nil {
 						slog.Error("failed to persist project index", "repo", slug, "project", projectName, "err", persistErr)
@@ -304,7 +308,7 @@ func main() {
 				slog.Info("repo indexed", "repo", slug)
 			},
 			OnAllComplete: func(result indexer.IndexResult) {
-				slog.Info("fleet indexing complete", "total", result.Total, "ok", result.Succeeded, "failed", result.Failed)
+				slog.Info("fleet indexing complete", "total", result.Total, "ok", result.Succeeded, "failed", result.Failed, "skipped", result.Skipped)
 				// ── Cross-reference org contracts ──
 				if orgDB != nil && !orgPipelineRunning.Load() {
 					orgDB.FixRoutePaths() // fix __ path separators from C binary
@@ -354,7 +358,7 @@ func main() {
 		idx := newFleetIndexer(indexPool, nil)
 		slog.Info("running one-shot fleet indexing job", "force", cfg.RunForce)
 		result := idx.IndexAll(context.Background(), m.Repos, cfg.RunForce)
-		slog.Info("one-shot fleet indexing complete", "total", result.Total, "ok", result.Succeeded, "failed", result.Failed)
+		slog.Info("one-shot fleet indexing complete", "total", result.Total, "ok", result.Succeeded, "failed", result.Failed, "skipped", result.Skipped)
 		if result.Failed > 0 {
 			os.Exit(1)
 		}
@@ -462,7 +466,7 @@ func main() {
 			defer fleetIndexing.Store(false)
 			slog.Info("fleet index starting", "reason", reason, "force", force)
 			result := idx.IndexAll(context.Background(), m.Repos, force)
-			slog.Info("fleet index complete", "reason", reason, "force", force, "total", result.Total, "ok", result.Succeeded, "failed", result.Failed)
+			slog.Info("fleet index complete", "reason", reason, "force", force, "total", result.Total, "ok", result.Succeeded, "failed", result.Failed, "skipped", result.Skipped)
 		}()
 		return true
 	}
@@ -579,15 +583,6 @@ func main() {
 			if artifactSync != nil {
 				clonePath := filepath.Join(cfg.CloneCacheDir, repoSlug)
 				projectName := projectNameFromPath(clonePath)
-				rawName := rawProjectNameFromPath(clonePath)
-				if rawName != projectName {
-					src := filepath.Join(cfg.CBMCacheDir, rawName+".db")
-					dst := filepath.Join(cfg.CBMCacheDir, projectName+".db")
-					if _, statErr := os.Stat(src); statErr == nil {
-						os.Rename(src, dst)
-							renameProjectInDB(dst, rawName, projectName)
-					}
-				}
 				if _, persistErr := artifactSync.PersistProject(projectName); persistErr != nil {
 					slog.Error("webhook: persist failed", "repo", repoSlug, "err", persistErr)
 				} else {
@@ -628,15 +623,6 @@ func main() {
 			if artifactSync != nil {
 				clonePath := filepath.Join(cfg.CloneCacheDir, slug)
 				projectName := projectNameFromPath(clonePath)
-				rawName := rawProjectNameFromPath(clonePath)
-				if rawName != projectName {
-					src := filepath.Join(cfg.CBMCacheDir, rawName+".db")
-					dst := filepath.Join(cfg.CBMCacheDir, projectName+".db")
-					if _, statErr := os.Stat(src); statErr == nil {
-						os.Rename(src, dst)
-							renameProjectInDB(dst, rawName, projectName)
-					}
-				}
 				persisted, persistErr := artifactSync.PersistProject(projectName)
 				if persistErr != nil {
 					slog.Error("manual index: persist failed", "repo", slug, "project", projectName, "err", persistErr)
@@ -1039,23 +1025,6 @@ func loadConfig() config {
 	}
 }
 
-// renameProjectInDB updates the internal project name in all SQLite tables
-// after the .db file has been renamed (e.g. from tmp-fleet-repos-X to data-fleet-cache-repos-X).
-func renameProjectInDB(dbPath, oldName, newName string) {
-	db, err := sql.Open("sqlite", dbPath+"?_pragma=busy_timeout(5000)")
-	if err != nil {
-		slog.Warn("renameProjectInDB: open failed", "path", dbPath, "err", err)
-		return
-	}
-	defer db.Close()
-	tables := []string{"projects", "nodes", "edges", "file_hashes"}
-	for _, table := range tables {
-		_, _ = db.Exec(fmt.Sprintf("UPDATE %s SET project = ? WHERE project = ?", table), newName, oldName)
-	}
-	// Also update the projects.name column (which is the primary key reference)
-	_, _ = db.Exec("UPDATE projects SET name = ? WHERE name = ?", newName, oldName)
-	slog.Info("renameProjectInDB: updated internal project name", "old", oldName, "new", newName)
-}
 
 func defaultManifestPath() string {
 	candidates := []string{
@@ -1075,24 +1044,18 @@ func defaultManifestPath() string {
 // This ensures consistent project names regardless of where repos are cloned.
 var projectNamePrefix = os.Getenv("PROJECT_NAME_PREFIX")
 
-// rawProjectNameFromPath returns the project name the C binary actually uses
-// (derived purely from the filesystem path, no prefix override).
-func rawProjectNameFromPath(absPath string) string {
-	return projectNameFromPathInternal(absPath, false)
-}
-
+// projectNameFromPath returns the canonical project name for a clone path.
+// When PROJECT_NAME_PREFIX is set, it uses prefix + slug (e.g.
+// "data-fleet-cache-repos-membership-backend"). Otherwise it falls back to
+// replacing path separators with dashes.
 func projectNameFromPath(absPath string) string {
-	return projectNameFromPathInternal(absPath, true)
-}
-
-func projectNameFromPathInternal(absPath string, usePrefix bool) string {
 	path := filepath.ToSlash(strings.TrimSpace(absPath))
 	if path == "" {
 		return "root"
 	}
 
-	// If a prefix override is set and allowed, use it + the last path segment.
-	if usePrefix && projectNamePrefix != "" {
+	// Preferred: prefix + last path segment (the repo slug).
+	if projectNamePrefix != "" {
 		slug := filepath.Base(path)
 		if slug == "" || slug == "." || slug == "/" {
 			return "root"
@@ -1100,6 +1063,7 @@ func projectNameFromPathInternal(absPath string, usePrefix bool) string {
 		return projectNamePrefix + "-" + slug
 	}
 
+	// Fallback (local dev, no prefix set): replace separators with dashes.
 	var b strings.Builder
 	b.Grow(len(path))
 	prevDash := false
@@ -1121,6 +1085,71 @@ func projectNameFromPathInternal(absPath string, usePrefix bool) string {
 		return "root"
 	}
 	return project
+}
+
+// ── Activity checking ──────────────────────────────────────────
+
+// githubActivityChecker implements indexer.ActivityChecker using the GitHub API
+// to skip repos with no commits in the last N days.
+type githubActivityChecker struct {
+	token   string
+	baseURL string
+	org     string
+	days    int
+}
+
+func (c *githubActivityChecker) IsActive(ctx context.Context, repoName string) bool {
+	if c.token == "" || c.org == "" {
+		return true // can't check, assume active
+	}
+	url := fmt.Sprintf("%s/repos/%s/%s/commits?per_page=1", c.baseURL, c.org, repoName)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		slog.Warn("activity check: request build failed", "repo", repoName, "err", err)
+		return true
+	}
+	req.Header.Set("Authorization", "Bearer "+c.token)
+	req.Header.Set("Accept", "application/vnd.github+json")
+
+	client := &http.Client{Timeout: 10 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		slog.Warn("activity check: request failed", "repo", repoName, "err", err)
+		return true // network error — assume active to avoid skipping
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		// 404 = repo deleted/renamed, 403 = rate limited; assume active to be safe
+		return true
+	}
+
+	var commits []struct {
+		Commit struct {
+			Committer struct {
+				Date time.Time `json:"date"`
+			} `json:"committer"`
+		} `json:"commit"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&commits); err != nil || len(commits) == 0 {
+		return true
+	}
+
+	cutoff := time.Now().AddDate(0, 0, -c.days)
+	active := commits[0].Commit.Committer.Date.After(cutoff)
+	if !active {
+		slog.Info("activity check: stale repo, skipping", "repo", repoName,
+			"last_commit", commits[0].Commit.Committer.Date.Format(time.RFC3339),
+			"cutoff_days", c.days)
+	}
+	return active
+}
+
+func firstOrg(orgs []string) string {
+	if len(orgs) > 0 {
+		return orgs[0]
+	}
+	return ""
 }
 
 func defaultBinaryPath() string {
@@ -1617,11 +1646,15 @@ func newMCPIndexClientPool(ctx context.Context, binPath string, size int, maxUse
 	return &mcpIndexClientPool{mcpToolClientPool: pool}, nil
 }
 
-func (p *mcpIndexClientPool) IndexRepository(ctx context.Context, repoPath, mode string) error {
-	result, err := p.CallTool(ctx, "index_repository", map[string]interface{}{
+func (p *mcpIndexClientPool) IndexRepository(ctx context.Context, repoPath, mode, projectName string) error {
+	args := map[string]interface{}{
 		"repo_path": repoPath,
 		"mode":      mode,
-	})
+	}
+	if projectName != "" {
+		args["project"] = projectName
+	}
+	result, err := p.CallTool(ctx, "index_repository", args)
 	if err != nil {
 		return fmt.Errorf("index_repository: %w", err)
 	}

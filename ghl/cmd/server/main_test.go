@@ -480,7 +480,7 @@ func TestMCPIndexClientPoolRunsConcurrentIndexing(t *testing.T) {
 	errCh := make(chan error, 6)
 	for i := 0; i < 6; i++ {
 		go func() {
-			errCh <- pool.IndexRepository(context.Background(), "/tmp/repo", "moderate")
+			errCh <- pool.IndexRepository(context.Background(), "/tmp/repo", "moderate", "")
 		}()
 	}
 	for i := 0; i < 6; i++ {
@@ -517,7 +517,7 @@ func TestMCPIndexClientPoolPropagatesToolErrors(t *testing.T) {
 	}
 	defer pool.Close()
 
-	err = pool.IndexRepository(context.Background(), "/tmp/repo", "full")
+	err = pool.IndexRepository(context.Background(), "/tmp/repo", "full", "")
 	if err == nil {
 		t.Fatal("expected tool error")
 	}
@@ -810,6 +810,7 @@ func newFakeOrgTools() *fakeOrgTools {
 			{Name: "org_trace_flow", Description: "trace flow", InputSchema: map[string]interface{}{"type": "object"}},
 			{Name: "org_team_topology", Description: "team topology", InputSchema: map[string]interface{}{"type": "object"}},
 			{Name: "org_search", Description: "org search", InputSchema: map[string]interface{}{"type": "object"}},
+			{Name: "org_code_search", Description: "cross-repo code search", InputSchema: map[string]interface{}{"type": "object"}},
 		},
 	}
 }
@@ -837,9 +838,9 @@ func TestMCPBridgeBackend_AppendOrgTools(t *testing.T) {
 		t.Fatalf("parse tools/list result: %v", err)
 	}
 
-	// 1 upstream + 5 org tools = 6 total (no discovery)
-	if len(result.Tools) != 6 {
-		t.Fatalf("tools count: want 6, got %d (tools: %+v)", len(result.Tools), result.Tools)
+	// 1 upstream + 6 org tools = 7 total (no discovery)
+	if len(result.Tools) != 7 {
+		t.Fatalf("tools count: want 7, got %d (tools: %+v)", len(result.Tools), result.Tools)
 	}
 	if result.Tools[0].Name != "list_projects" {
 		t.Errorf("first tool: want list_projects, got %q", result.Tools[0].Name)
@@ -849,7 +850,7 @@ func TestMCPBridgeBackend_AppendOrgTools(t *testing.T) {
 	for _, tool := range result.Tools[1:] {
 		orgNames[tool.Name] = true
 	}
-	for _, expected := range []string{"org_dependency_graph", "org_blast_radius", "org_trace_flow", "org_team_topology", "org_search"} {
+	for _, expected := range []string{"org_dependency_graph", "org_blast_radius", "org_trace_flow", "org_team_topology", "org_search", "org_code_search"} {
 		if !orgNames[expected] {
 			t.Errorf("missing org tool %q in tools/list", expected)
 		}
