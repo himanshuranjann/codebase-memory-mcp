@@ -511,11 +511,12 @@ static int store_authorizer(void *user_data, int action, const char *p3, const c
 }
 
 static cbm_store_t *store_open_internal(const char *path, bool in_memory) {
-    /* Hard heap limit: SQLite returns SQLITE_NOMEM instead of OOM crash */
+    /* Soft heap limit: SQLite tries to release cache pages when exceeded.
+     * No hard limit — large repos (140K+ nodes) need >512MB during indexing.
+     * PRAGMA temp_store=FILE handles the memory pressure instead. */
     static int limits_set = 0;
     if (!limits_set) {
-        sqlite3_soft_heap_limit64(256LL * 1024 * 1024);
-        sqlite3_hard_heap_limit64(512LL * 1024 * 1024);
+        sqlite3_soft_heap_limit64(512LL * 1024 * 1024);
         limits_set = 1;
     }
 
