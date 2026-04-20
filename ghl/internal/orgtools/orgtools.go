@@ -8,6 +8,8 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
+	"time"
 
 	"github.com/GoHighLevel/codebase-memory-mcp/ghl/internal/discovery"
 	"github.com/GoHighLevel/codebase-memory-mcp/ghl/internal/mcp"
@@ -298,6 +300,8 @@ func (s *OrgService) codeSearch(ctx context.Context, args map[string]interface{}
 	var results []CodeSearchResult
 
 	var wg sync.WaitGroup
+	var completed atomic.Int64
+	total := len(repos)
 	for _, repo := range repos {
 		wg.Add(1)
 		// The C binary expects project names with the "data-fleet-cache-repos-" prefix
@@ -307,7 +311,14 @@ func (s *OrgService) codeSearch(ctx context.Context, args map[string]interface{}
 			sem <- struct{}{}
 			defer func() { <-sem }()
 
-			toolResult, callErr := bridge.CallTool(ctx, "search_code", map[string]interface{}{
+			// Per-repo timeout to prevent one slow repo from blocking everything
+			repoCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+			defer cancel()
+
+			done := completed.Add(1)
+			slog.Info("org_code_search: searching", "repo", repoName, "progress", fmt.Sprintf("%d/%d", done, total))
+
+			toolResult, callErr := bridge.CallTool(repoCtx, "search_code", map[string]interface{}{
 				"project": project,
 				"pattern": pattern,
 			})

@@ -226,6 +226,16 @@ char *cbm_jsonrpc_format_error(int64_t id, int code, const char *message) {
  *  MCP PROTOCOL HELPERS
  * ══════════════════════════════════════════════════════════════════ */
 
+/* Emit a progress notification on stdout to keep the client connection alive.
+ * MCP spec (2025-03-26+): clients MAY reset their timeout on each progress. */
+static void emit_progress(int current, int total, const char *message) {
+    fprintf(stdout,
+        "{\"jsonrpc\":\"2.0\",\"method\":\"notifications/progress\","
+        "\"params\":{\"progress\":%d,\"total\":%d,\"message\":\"%s\"}}\n",
+        current, total, message);
+    fflush(stdout);
+}
+
 char *cbm_mcp_text_result(const char *text, bool is_error) {
     yyjson_mut_doc *doc = yyjson_mut_doc_new(NULL);
     yyjson_mut_val *root = yyjson_mut_obj(doc);
@@ -3022,6 +3032,7 @@ static char *handle_search_code(cbm_mcp_server_t *srv, const char *args) {
     }
 
     /* Collect grep matches into array */
+    emit_progress(1, 3, "Scanning files with grep...");
     int gm_count = 0;
     grep_match_t *gm = collect_grep_matches(fp, root_path, strlen(root_path), has_path_filter,
                                             &path_regex, grep_limit, &gm_count);
@@ -3032,6 +3043,7 @@ static char *handle_search_code(cbm_mcp_server_t *srv, const char *args) {
     }
 
     /* ── Phase 2+3: Block expansion + graph ranking ──────────── */
+    emit_progress(2, 3, "Classifying and ranking matches...");
     /* Sort grep matches by file for contiguous processing.
      * Then: one SQL query per unique file for nodes, one batch query for all degrees. */
 
@@ -3187,6 +3199,7 @@ static char *handle_detect_changes(cbm_mcp_server_t *srv, const char *args) {
     /* resolve_store already called via get_project_root above */
     cbm_store_t *store = srv->store;
 
+    emit_progress(1, 3, "Running git diff...");
     char line[CBM_SZ_1K];
     int file_count = 0;
     enum { MAX_CHANGED_FILES = 200, MAX_SYMBOL_FILES = 50 };
@@ -3206,11 +3219,17 @@ static char *handle_detect_changes(cbm_mcp_server_t *srv, const char *args) {
         file_count++;
 
         if (want_symbols && file_count <= MAX_SYMBOL_FILES) {
+            if (file_count % 10 == 0) {
+                char msg[128];
+                snprintf(msg, sizeof(msg), "Analyzing symbols: %d files processed", file_count);
+                emit_progress(2, 3, msg);
+            }
             detect_add_impacted_symbols(store, project, line, doc, impacted);
         }
     }
     cbm_pclose(fp);
 
+    emit_progress(3, 3, "Building response...");
     yyjson_mut_obj_add_val(doc, root_obj, "changed_files", changed);
     yyjson_mut_obj_add_int(doc, root_obj, "changed_count", file_count);
     yyjson_mut_obj_add_val(doc, root_obj, "impacted_symbols", impacted);
