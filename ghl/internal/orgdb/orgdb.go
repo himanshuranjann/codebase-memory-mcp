@@ -277,6 +277,46 @@ func (d *DB) ensureSchema() error {
 			severity    TEXT,
 			detected_at INTEGER
 		)`,
+		// Scheduled jobs — @Cron / @Interval / @Timeout declarations.
+		// Each row is a single decorated method. No cross-repo edges.
+		`CREATE TABLE IF NOT EXISTS scheduled_jobs (
+			id         INTEGER PRIMARY KEY,
+			repo_name  TEXT NOT NULL,
+			kind       TEXT NOT NULL,
+			schedule   TEXT NOT NULL,
+			symbol     TEXT,
+			file_path  TEXT
+		)`,
+		// HTTP client call sites (axios/httpService/fetch with literal URL).
+		// Stored separately from api_contracts so cross-ref matching doesn't
+		// have to filter external URLs. Consumer-only rows; no provider side.
+		`CREATE TABLE IF NOT EXISTS http_client_calls (
+			id          INTEGER PRIMARY KEY,
+			repo_name   TEXT NOT NULL,
+			method      TEXT NOT NULL,
+			url         TEXT NOT NULL,
+			symbol      TEXT,
+			file_path   TEXT
+		)`,
+		// gRPC methods (provider-side).
+		`CREATE TABLE IF NOT EXISTS grpc_methods (
+			id          INTEGER PRIMARY KEY,
+			repo_name   TEXT NOT NULL,
+			service     TEXT NOT NULL,
+			method      TEXT NOT NULL,
+			streaming   INTEGER NOT NULL DEFAULT 0,
+			symbol      TEXT,
+			file_path   TEXT
+		)`,
+		// GraphQL resolver ops (provider-side).
+		`CREATE TABLE IF NOT EXISTS graphql_ops (
+			id          INTEGER PRIMARY KEY,
+			repo_name   TEXT NOT NULL,
+			kind        TEXT NOT NULL,
+			name        TEXT,
+			symbol      TEXT,
+			file_path   TEXT
+		)`,
 		// Indexes that power blast_radius and trace_flow. All are
 		// IF NOT EXISTS so existing hydrated org.db files pick them up
 		// on the next Open() without requiring a rebuild.
@@ -286,6 +326,15 @@ func (d *DB) ensureSchema() error {
 		`CREATE INDEX IF NOT EXISTS idx_event_consumer ON event_contracts(consumer_repo)`,
 		`CREATE INDEX IF NOT EXISTS idx_packages_provider ON packages(provider_repo)`,
 		`CREATE INDEX IF NOT EXISTS idx_team_ownership_team ON team_ownership(team)`,
+		// New extractor tables.
+		`CREATE INDEX IF NOT EXISTS idx_scheduled_repo ON scheduled_jobs(repo_name)`,
+		`CREATE INDEX IF NOT EXISTS idx_http_repo ON http_client_calls(repo_name)`,
+		`CREATE INDEX IF NOT EXISTS idx_grpc_repo ON grpc_methods(repo_name)`,
+		`CREATE INDEX IF NOT EXISTS idx_graphql_repo ON graphql_ops(repo_name)`,
+		`CREATE INDEX IF NOT EXISTS idx_deploy_repo ON deployments(repo_name)`,
+		`CREATE INDEX IF NOT EXISTS idx_shared_dbs_repo ON shared_databases(repo_name)`,
+		`CREATE INDEX IF NOT EXISTS idx_service_mesh_source ON service_mesh(source_repo)`,
+		`CREATE INDEX IF NOT EXISTS idx_service_mesh_target ON service_mesh(target_repo)`,
 	}
 	for _, stmt := range statements {
 		if _, err := d.db.Exec(stmt); err != nil {
