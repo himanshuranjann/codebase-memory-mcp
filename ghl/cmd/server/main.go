@@ -1751,11 +1751,16 @@ func (b *mcpBridgeBackend) Call(ctx context.Context, method string, params json.
 			}
 		}
 
-		// Hard 20s timeout on every C binary tool call.
-		// The C binary has a 15s grep timeout, so 20s gives it margin.
-		// Without this, hung C binaries block the bridge client forever
-		// because bufio.Scanner.Scan() doesn't respect context cancellation.
-		toolCtx, cancel := context.WithTimeout(ctx, 20*time.Second)
+		// Hard timeout on every C binary tool call. Without this, hung C
+		// binaries block the bridge client forever because bufio.Scanner.Scan()
+		// doesn't respect context cancellation.
+		// search_code gets 60s (grep on GCS Fuse is slow for large repos).
+		// All other tools get 20s (they query local SQLite, fast).
+		toolTimeout := 20 * time.Second
+		if name == "search_code" {
+			toolTimeout = 60 * time.Second
+		}
+		toolCtx, cancel := context.WithTimeout(ctx, toolTimeout)
 		defer cancel()
 
 		result, err := b.client.CallTool(toolCtx, name, args)
