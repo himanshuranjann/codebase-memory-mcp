@@ -254,6 +254,13 @@ func (s *OrgService) blastRadius(args map[string]interface{}) (interface{}, erro
 func (s *OrgService) traceFlow(args map[string]interface{}) (interface{}, error) {
 	trigger, _ := args["trigger"].(string)
 	direction, _ := args["direction"].(string)
+	switch direction {
+	case "", "upstream", "downstream":
+		// ok — empty string is accepted and normalized to "downstream"
+		// by the underlying TraceFlow call.
+	default:
+		return nil, fmt.Errorf("org_trace_flow: direction must be 'upstream' or 'downstream', got %q", direction)
+	}
 	maxHops := 3
 	if mh, ok := args["max_hops"].(float64); ok {
 		maxHops = int(mh)
@@ -286,8 +293,12 @@ func (s *OrgService) search(args map[string]interface{}) (interface{}, error) {
 	if scope == "" {
 		scope = "all"
 	}
-	if query == "" {
-		return nil, fmt.Errorf("query is required")
+	// A team-only search ("give me every repo on team X") is valid — the
+	// underlying SQL handles an empty `query` correctly via
+	// `LIKE '%' || '' || '%'`. Require either query or team so the
+	// caller still gets a meaningful response instead of a full dump.
+	if query == "" && team == "" {
+		return nil, fmt.Errorf("org_search: either `query` or `team` is required")
 	}
 	return s.getDB().SearchRepos(query, scope, team, limit)
 }

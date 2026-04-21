@@ -277,6 +277,15 @@ func (d *DB) ensureSchema() error {
 			severity    TEXT,
 			detected_at INTEGER
 		)`,
+		// Indexes that power blast_radius and trace_flow. All are
+		// IF NOT EXISTS so existing hydrated org.db files pick them up
+		// on the next Open() without requiring a rebuild.
+		`CREATE INDEX IF NOT EXISTS idx_api_provider ON api_contracts(provider_repo)`,
+		`CREATE INDEX IF NOT EXISTS idx_api_consumer ON api_contracts(consumer_repo)`,
+		`CREATE INDEX IF NOT EXISTS idx_event_producer ON event_contracts(producer_repo)`,
+		`CREATE INDEX IF NOT EXISTS idx_event_consumer ON event_contracts(consumer_repo)`,
+		`CREATE INDEX IF NOT EXISTS idx_packages_provider ON packages(provider_repo)`,
+		`CREATE INDEX IF NOT EXISTS idx_team_ownership_team ON team_ownership(team)`,
 	}
 	for _, stmt := range statements {
 		if _, err := d.db.Exec(stmt); err != nil {

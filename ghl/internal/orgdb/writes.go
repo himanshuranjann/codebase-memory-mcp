@@ -366,6 +366,13 @@ func (d *DB) CrossReferenceContracts() (int, error) {
 		}
 		key := provKey{cons.prefix, cons.route}
 		for _, prov := range exactIndex[key] {
+			// Skip self-references: a repo calling its own API via
+			// InternalRequest should not become its own consumer row,
+			// otherwise blast_radius and trace_flow surface spurious
+			// self-loops.
+			if prov.providerRepo == cons.consumerRepo {
+				continue
+			}
 			if cons.method == prov.method || prov.method == "ANY" || cons.method == "ANY" {
 				if err := updateConsumer(cons.id, prov.providerRepo, prov.providerSymbol, 0.8); err != nil {
 					return matched, fmt.Errorf("orgdb: cross-ref update %d: %w", cons.id, err)
@@ -382,15 +389,27 @@ func (d *DB) CrossReferenceContracts() (int, error) {
 		if matchedConsIDs[cons.id] || cons.prefix == "" {
 			continue
 		}
-		candidates := prefixIndex[cons.prefix]
-		if len(candidates) > 0 {
-			prov := candidates[0] // first provider repo for this service prefix
-			if err := updateConsumer(cons.id, prov.providerRepo, prov.providerSymbol, 0.5); err != nil {
-				return matched, fmt.Errorf("orgdb: cross-ref update %d: %w", cons.id, err)
+		// Pick the first provider for this prefix that isn't the consumer
+		// itself. Iterating preserves prior "first candidate" semantics
+		// while ignoring self-matches.
+		var prov contract
+		found := false
+		for _, p := range prefixIndex[cons.prefix] {
+			if p.providerRepo == cons.consumerRepo {
+				continue
 			}
-			matchedConsIDs[cons.id] = true
-			matched++
+			prov = p
+			found = true
+			break
 		}
+		if !found {
+			continue
+		}
+		if err := updateConsumer(cons.id, prov.providerRepo, prov.providerSymbol, 0.5); err != nil {
+			return matched, fmt.Errorf("orgdb: cross-ref update %d: %w", cons.id, err)
+		}
+		matchedConsIDs[cons.id] = true
+		matched++
 	}
 
 	return matched, nil
@@ -449,10 +468,13 @@ func (d *DB) CrossReferenceEventContracts() (int, error) {
 		consumers = append(consumers, c)
 	}
 
-	// Match by topic
+	// Match by topic, skipping producer==consumer self-references.
 	matched := 0
 	for _, cons := range consumers {
 		for _, prod := range producers {
+			if prod.producerRepo == cons.consumerRepo {
+				continue
+			}
 			if cons.topic == prod.topic {
 				_, err := d.db.Exec(`
 					UPDATE event_contracts SET

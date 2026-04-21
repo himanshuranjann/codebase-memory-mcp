@@ -90,29 +90,40 @@ func (d *DB) QueryDependents(packageScope, packageName string) ([]DependencyResu
 // QueryBlastRadius finds all repos affected by a change in the given repo.
 // It checks package dependents, API consumers, and event consumers.
 func (d *DB) QueryBlastRadius(repoName string) (BlastRadiusResult, error) {
+	// Exclude the repo itself from its own blast radius — this handles
+	// both "a repo depends on its own published package" (rare but
+	// possible for platform-* packages) and any lingering self-matched
+	// contracts in historical data.
 	rows, err := d.db.Query(`
-		SELECT DISTINCT affected.name, COALESCE(r.team, '') AS team, affected.reason FROM (
+		SELECT DISTINCT affected.name, COALESCE(NULLIF(r.team, ''), t.team, '') AS team, affected.reason FROM (
 			SELECT DISTINCT r.name AS name, 'depends_on_package' as reason
 			FROM repo_dependencies rd
 			JOIN repos r ON rd.repo_id = r.id
 			JOIN packages p ON rd.package_id = p.id
-			WHERE p.provider_repo = ?
+			WHERE p.provider_repo = ? AND r.name != ?
 
 			UNION
 
 			SELECT DISTINCT consumer_repo AS name, 'api_consumer'
 			FROM api_contracts
-			WHERE provider_repo = ? AND consumer_repo IS NOT NULL AND consumer_repo != ''
+			WHERE provider_repo = ?
+			  AND consumer_repo IS NOT NULL
+			  AND consumer_repo != ''
+			  AND consumer_repo != provider_repo
 
 			UNION
 
 			SELECT DISTINCT consumer_repo AS name, 'event_consumer'
 			FROM event_contracts
-			WHERE producer_repo = ? AND consumer_repo IS NOT NULL AND consumer_repo != ''
+			WHERE producer_repo = ?
+			  AND consumer_repo IS NOT NULL
+			  AND consumer_repo != ''
+			  AND consumer_repo != producer_repo
 		) affected
 		LEFT JOIN repos r ON r.name = affected.name
+		LEFT JOIN team_ownership t ON t.repo_name = affected.name
 		ORDER BY affected.name
-	`, repoName, repoName, repoName)
+	`, repoName, repoName, repoName, repoName)
 	if err != nil {
 		return BlastRadiusResult{}, fmt.Errorf("orgdb: query blast radius %q: %w", repoName, err)
 	}
@@ -145,25 +156,36 @@ func (d *DB) TraceFlow(trigger string, direction string, maxHops int) ([]FlowSte
 		maxHops = 4
 	}
 
+	// Self-loop filters (provider_repo != consumer_repo / producer_repo !=
+	// consumer_repo) are applied at every level so that historical rows
+	// written before the cross-reference fix can't pollute trace output.
 	var query string
 	if direction == "upstream" {
 		query = `
 			WITH RECURSIVE flow(from_repo, to_repo, edge_type, detail, confidence, depth) AS (
 				SELECT provider_repo, consumer_repo, 'api_contract', path, confidence, 1
-				FROM api_contracts WHERE consumer_repo = ? AND provider_repo != ''
+				FROM api_contracts
+				WHERE consumer_repo = ? AND provider_repo != '' AND provider_repo != consumer_repo
 				UNION ALL
 				SELECT producer_repo, consumer_repo, 'event_contract', topic, 1.0, 1
-				FROM event_contracts WHERE consumer_repo = ? AND producer_repo != ''
+				FROM event_contracts
+				WHERE consumer_repo = ? AND producer_repo != '' AND producer_repo != consumer_repo
 				UNION ALL
 				SELECT ac.provider_repo, f.from_repo, 'api_contract', ac.path, ac.confidence, f.depth + 1
 				FROM flow f
 				JOIN api_contracts ac ON ac.consumer_repo = f.from_repo
-				WHERE f.depth < ? AND ac.provider_repo != '' AND ac.provider_repo != f.to_repo
+				WHERE f.depth < ?
+				  AND ac.provider_repo != ''
+				  AND ac.provider_repo != f.to_repo
+				  AND ac.provider_repo != ac.consumer_repo
 				UNION ALL
 				SELECT ec.producer_repo, f.from_repo, 'event_contract', ec.topic, 1.0, f.depth + 1
 				FROM flow f
 				JOIN event_contracts ec ON ec.consumer_repo = f.from_repo
-				WHERE f.depth < ? AND ec.producer_repo != '' AND ec.producer_repo != f.to_repo
+				WHERE f.depth < ?
+				  AND ec.producer_repo != ''
+				  AND ec.producer_repo != f.to_repo
+				  AND ec.producer_repo != ec.consumer_repo
 			)
 			SELECT DISTINCT from_repo, to_repo, edge_type, detail, confidence FROM flow
 		`
@@ -171,20 +193,28 @@ func (d *DB) TraceFlow(trigger string, direction string, maxHops int) ([]FlowSte
 		query = `
 			WITH RECURSIVE flow(from_repo, to_repo, edge_type, detail, confidence, depth) AS (
 				SELECT provider_repo, consumer_repo, 'api_contract', path, confidence, 1
-				FROM api_contracts WHERE provider_repo = ? AND consumer_repo != ''
+				FROM api_contracts
+				WHERE provider_repo = ? AND consumer_repo != '' AND consumer_repo != provider_repo
 				UNION ALL
 				SELECT producer_repo, consumer_repo, 'event_contract', topic, 1.0, 1
-				FROM event_contracts WHERE producer_repo = ? AND consumer_repo != ''
+				FROM event_contracts
+				WHERE producer_repo = ? AND consumer_repo != '' AND consumer_repo != producer_repo
 				UNION ALL
 				SELECT f.to_repo, ac.consumer_repo, 'api_contract', ac.path, ac.confidence, f.depth + 1
 				FROM flow f
 				JOIN api_contracts ac ON ac.provider_repo = f.to_repo
-				WHERE f.depth < ? AND ac.consumer_repo != '' AND ac.consumer_repo != f.from_repo
+				WHERE f.depth < ?
+				  AND ac.consumer_repo != ''
+				  AND ac.consumer_repo != f.from_repo
+				  AND ac.consumer_repo != ac.provider_repo
 				UNION ALL
 				SELECT f.to_repo, ec.consumer_repo, 'event_contract', ec.topic, 1.0, f.depth + 1
 				FROM flow f
 				JOIN event_contracts ec ON ec.producer_repo = f.to_repo
-				WHERE f.depth < ? AND ec.consumer_repo != '' AND ec.consumer_repo != f.from_repo
+				WHERE f.depth < ?
+				  AND ec.consumer_repo != ''
+				  AND ec.consumer_repo != f.from_repo
+				  AND ec.consumer_repo != ec.producer_repo
 			)
 			SELECT DISTINCT from_repo, to_repo, edge_type, detail, confidence FROM flow
 		`
