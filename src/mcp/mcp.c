@@ -2719,25 +2719,7 @@ static grep_match_t *collect_grep_matches(FILE *fp, const char *root_path, size_
     grep_match_t *gm = malloc(gm_cap * sizeof(grep_match_t));
     char line[CBM_SZ_2K];
 
-    /* Record start time for 15-second hard timeout on grep collection. */
-    enum { GREP_TIMEOUT_MS = 15000 };
-    struct timespec ts_start, ts_now;
-    clock_gettime(CLOCK_MONOTONIC, &ts_start);
-
     while (fgets(line, sizeof(line), fp) && gm_count < grep_limit) {
-        /* Check wall-clock elapsed time; break with partial results if >15s. */
-        clock_gettime(CLOCK_MONOTONIC, &ts_now);
-        long elapsed_ms = (ts_now.tv_sec - ts_start.tv_sec) * 1000L +
-                          (ts_now.tv_nsec - ts_start.tv_nsec) / 1000000L;
-        if (elapsed_ms > GREP_TIMEOUT_MS) {
-            char elapsed_buf[CBM_SZ_32];
-            char matches_buf[CBM_SZ_32];
-            snprintf(elapsed_buf, sizeof(elapsed_buf), "%ld", elapsed_ms);
-            snprintf(matches_buf, sizeof(matches_buf), "%d", gm_count);
-            cbm_log_warn("search_code.grep_timeout", "elapsed_ms", elapsed_buf, "matches_so_far",
-                         matches_buf);
-            break;
-        }
         size_t len = strlen(line);
         while (len > 0 && (line[len - SKIP_ONE] == '\n' || line[len - SKIP_ONE] == '\r')) {
             line[--len] = '\0';
@@ -3083,10 +3065,10 @@ static char *handle_search_code(cbm_mcp_server_t *srv, const char *args) {
         return cbm_mcp_text_result("search failed: temp file", true);
     }
 
-    /* Cap grep matches to 3x the requested limit to allow for dedup and
+    /* Cap grep matches to 5x the requested limit to allow for dedup and
      * ranking, but prevent unbounded memory on large repos. */
-    enum { GREP_MIN_MATCHES = 25, GREP_MAX_MATCHES = 100 };
-    int grep_limit = limit * 3;
+    enum { GREP_MIN_MATCHES = 50, GREP_MAX_MATCHES = 500 };
+    int grep_limit = limit * 5;
     if (grep_limit < GREP_MIN_MATCHES) grep_limit = GREP_MIN_MATCHES;
     if (grep_limit > GREP_MAX_MATCHES) grep_limit = GREP_MAX_MATCHES;
 
