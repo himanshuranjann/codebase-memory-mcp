@@ -40,6 +40,7 @@ import (
 	"github.com/GoHighLevel/codebase-memory-mcp/ghl/internal/orgdiscovery"
 	"github.com/GoHighLevel/codebase-memory-mcp/ghl/internal/orgtools"
 	"github.com/GoHighLevel/codebase-memory-mcp/ghl/internal/pipeline"
+	"github.com/GoHighLevel/codebase-memory-mcp/ghl/internal/searchtools"
 	"github.com/GoHighLevel/codebase-memory-mcp/ghl/internal/webhook"
 )
 
@@ -558,7 +559,7 @@ func main() {
 
 	// Bridge: forward MCP calls to the binary
 	bridgeHandler := bridge.NewHandler(
-		&mcpBridgeBackend{client: bridgePool, discovery: discoverySvc, orgTools: orgToolSvc, cache: searchCache},
+		&mcpBridgeBackend{client: bridgePool, discovery: discoverySvc, orgTools: orgToolSvc, cache: searchCache, cacheDir: cfg.CBMCacheDir},
 		bridge.Config{BearerToken: cfg.BearerToken, Authenticator: requestAuthenticator},
 	)
 	r.Mount("/mcp", bridgeHandler)
@@ -1695,6 +1696,7 @@ type mcpBridgeBackend struct {
 	discovery discovery.Service
 	orgTools  orgToolService
 	cache     *bridge.SearchCache
+	cacheDir  string // CBM cache dir where per-project .db files live
 }
 
 func (b *mcpBridgeBackend) Call(ctx context.Context, method string, params json.RawMessage) (json.RawMessage, error) {
@@ -1751,16 +1753,33 @@ func (b *mcpBridgeBackend) Call(ctx context.Context, method string, params json.
 			}
 		}
 
+		// ── Go-native search_code ──
+		// Bypass C binary entirely for search_code. The C binary runs `grep -rn`
+		// on GCS Fuse-mounted repos which is catastrophically slow (minutes for
+		// 63K-file repos). Our Go path:
+		//   1. Queries SQLite for the pre-indexed file list (no filesystem walk)
+		//   2. Reads files in parallel (64 goroutines — saturates GCS Fuse)
+		//   3. Runs Go regexp (same semantics as grep -E)
+		//   4. Classifies matches against indexed nodes (same output as C binary)
+		// Full grep accuracy, never hangs, hard 30s deadline.
+		if name == "search_code" {
+			goSearchCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+			defer cancel()
+			raw, goErr := b.runGoSearchCode(goSearchCtx, args)
+			if goErr == nil {
+				if cacheable {
+					b.cache.Set(cacheKey, raw)
+				}
+				return raw, nil
+			}
+			// Log and fall through to C binary as safety net.
+			slog.Warn("go-native search_code failed, falling back to C binary", "err", goErr)
+		}
+
 		// Hard timeout on every C binary tool call. Without this, hung C
 		// binaries block the bridge client forever because bufio.Scanner.Scan()
 		// doesn't respect context cancellation.
-		// search_code gets 60s (grep on GCS Fuse is slow for large repos).
-		// All other tools get 20s (they query local SQLite, fast).
-		toolTimeout := 20 * time.Second
-		if name == "search_code" {
-			toolTimeout = 60 * time.Second
-		}
-		toolCtx, cancel := context.WithTimeout(ctx, toolTimeout)
+		toolCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 		defer cancel()
 
 		result, err := b.client.CallTool(toolCtx, name, args)
@@ -1882,6 +1901,39 @@ func (b *mcpBridgeBackend) callOrgTool(ctx context.Context, name string, args ma
 	}
 	return json.Marshal(mcp.ToolResult{
 		Content: []mcp.Content{{Type: "text", Text: string(text)}},
+		IsError: false,
+	})
+}
+
+// runGoSearchCode executes search_code entirely in Go — bypasses the C binary.
+// See searchtools package for architecture details.
+func (b *mcpBridgeBackend) runGoSearchCode(ctx context.Context, args map[string]interface{}) (json.RawMessage, error) {
+	if b.cacheDir == "" {
+		return nil, errors.New("cache dir not configured")
+	}
+
+	// Unmarshal args.
+	raw, err := json.Marshal(args)
+	if err != nil {
+		return nil, fmt.Errorf("marshal args: %w", err)
+	}
+	var sargs searchtools.SearchCodeArgs
+	if err := json.Unmarshal(raw, &sargs); err != nil {
+		return nil, fmt.Errorf("parse args: %w", err)
+	}
+
+	result, err := searchtools.HandleSearchCode(ctx, b.cacheDir, sargs)
+	if err != nil {
+		return nil, err
+	}
+
+	// Format as MCP ToolResult (same shape as C binary output).
+	body, err := json.Marshal(result)
+	if err != nil {
+		return nil, fmt.Errorf("marshal search result: %w", err)
+	}
+	return json.Marshal(mcp.ToolResult{
+		Content: []mcp.Content{{Type: "text", Text: string(body)}},
 		IsError: false,
 	})
 }
