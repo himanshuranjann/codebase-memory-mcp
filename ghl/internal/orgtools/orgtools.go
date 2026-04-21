@@ -5,12 +5,15 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
+	"os"
 	"path/filepath"
 	"sort"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/GoHighLevel/codebase-memory-mcp/ghl/internal/discovery"
 	"github.com/GoHighLevel/codebase-memory-mcp/ghl/internal/mcp"
@@ -22,12 +25,16 @@ type BridgeCaller interface {
 	CallTool(ctx context.Context, name string, params map[string]interface{}) (*mcp.ToolResult, error)
 }
 
+// WarmupWaiter blocks a tool call until org graph data is ready.
+type WarmupWaiter func(ctx context.Context, toolName string) error
+
 // OrgService dispatches org tool calls to the appropriate orgdb query.
 // The DB can be swapped at runtime via SetDB (e.g., after re-hydration).
 type OrgService struct {
 	db       *orgdb.DB
 	bridge   BridgeCaller
 	cacheDir string // CBM cache dir where .db files live
+	waiter   WarmupWaiter
 	mu       sync.RWMutex
 }
 
@@ -50,10 +57,23 @@ func (s *OrgService) SetBridge(b BridgeCaller) {
 	s.mu.Unlock()
 }
 
+// SetWarmupWaiter installs a readiness gate for org tool calls.
+func (s *OrgService) SetWarmupWaiter(waiter WarmupWaiter) {
+	s.mu.Lock()
+	s.waiter = waiter
+	s.mu.Unlock()
+}
+
 func (s *OrgService) getBridge() BridgeCaller {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return s.bridge
+}
+
+func (s *OrgService) getCacheDir() string {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.cacheDir
 }
 
 // SetDB atomically swaps the underlying database (used after re-hydration).
@@ -151,6 +171,10 @@ func (s *OrgService) Definitions() []discovery.ToolDefinition {
 
 // CallTool routes a tool call to the appropriate handler.
 func (s *OrgService) CallTool(ctx context.Context, name string, args map[string]interface{}) (interface{}, error) {
+	if err := s.waitUntilReady(ctx, name); err != nil {
+		return nil, err
+	}
+
 	switch name {
 	case "org_dependency_graph":
 		return s.dependencyGraph(args)
@@ -176,6 +200,25 @@ func (s *OrgService) IsOrgTool(name string) bool {
 		return true
 	}
 	return false
+}
+
+func (s *OrgService) waitUntilReady(ctx context.Context, toolName string) error {
+	s.mu.RLock()
+	waiter := s.waiter
+	s.mu.RUnlock()
+	if waiter == nil {
+		return nil
+	}
+
+	waitCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+	if err := waiter(waitCtx, toolName); err != nil {
+		if errors.Is(err, context.DeadlineExceeded) && ctx.Err() == nil {
+			return fmt.Errorf("%s unavailable: org graph is still warming up", toolName)
+		}
+		return err
+	}
+	return nil
 }
 
 // NormalizePattern strips a leading '@' from decorator patterns and optionally
@@ -211,6 +254,13 @@ func (s *OrgService) blastRadius(args map[string]interface{}) (interface{}, erro
 func (s *OrgService) traceFlow(args map[string]interface{}) (interface{}, error) {
 	trigger, _ := args["trigger"].(string)
 	direction, _ := args["direction"].(string)
+	switch direction {
+	case "", "upstream", "downstream":
+		// ok — empty string is accepted and normalized to "downstream"
+		// by the underlying TraceFlow call.
+	default:
+		return nil, fmt.Errorf("org_trace_flow: direction must be 'upstream' or 'downstream', got %q", direction)
+	}
 	maxHops := 3
 	if mh, ok := args["max_hops"].(float64); ok {
 		maxHops = int(mh)
@@ -243,8 +293,12 @@ func (s *OrgService) search(args map[string]interface{}) (interface{}, error) {
 	if scope == "" {
 		scope = "all"
 	}
-	if query == "" {
-		return nil, fmt.Errorf("query is required")
+	// A team-only search ("give me every repo on team X") is valid — the
+	// underlying SQL handles an empty `query` correctly via
+	// `LIKE '%' || '' || '%'`. Require either query or team so the
+	// caller still gets a meaningful response instead of a full dump.
+	if query == "" && team == "" {
+		return nil, fmt.Errorf("org_search: either `query` or `team` is required")
 	}
 	return s.getDB().SearchRepos(query, scope, team, limit)
 }
@@ -264,13 +318,18 @@ type FTSMatch struct {
 	FilePath      string `json:"file_path"`
 }
 
-// codeSearch queries per-project FTS5 indexes directly via SQL.
-// This is orders of magnitude faster than grep fan-out: <1s vs 2-5min.
+// codeSearch queries per-project indexes directly via SQL and falls back to the
+// bridge when local cache files are unavailable.
 func (s *OrgService) codeSearch(ctx context.Context, args map[string]interface{}) (interface{}, error) {
 	pattern, _ := args["pattern"].(string)
 	if pattern == "" {
 		return nil, fmt.Errorf("pattern is required")
 	}
+	caseInsensitive := true
+	if ci, ok := args["case_insensitive"].(bool); ok {
+		caseInsensitive = ci
+	}
+	normalizedPattern := NormalizePattern(pattern, caseInsensitive)
 
 	maxRepos := 20
 	if mr, ok := args["max_repos"].(float64); ok && int(mr) > 0 {
@@ -288,15 +347,12 @@ func (s *OrgService) codeSearch(ctx context.Context, args map[string]interface{}
 		}
 	}
 
-	s.mu.RLock()
-	cacheDir := s.cacheDir
-	s.mu.RUnlock()
-
-	if cacheDir == "" {
-		return nil, fmt.Errorf("org_code_search: cache dir not configured")
+	cacheDir := s.getCacheDir()
+	bridge := s.getBridge()
+	if cacheDir == "" && bridge == nil {
+		return nil, fmt.Errorf("org_code_search: cache dir not configured and bridge unavailable")
 	}
 
-	// Get top repos by node count from org.db
 	repos, err := s.getDB().TopReposByNodeCount(maxRepos)
 	if err != nil {
 		return nil, fmt.Errorf("org_code_search: list repos: %w", err)
@@ -305,15 +361,11 @@ func (s *OrgService) codeSearch(ctx context.Context, args map[string]interface{}
 		return []CodeSearchResult{}, nil
 	}
 
-	slog.Info("org_code_search: query", "repos", len(repos), "pattern", pattern)
+	slog.Info("org_code_search: query", "repos", len(repos), "pattern", normalizedPattern)
 
-	// Query each project concurrently. FTS5 first (fast), LIKE fallback for
-	// camelCase patterns that FTS5's unicode61 tokenizer splits apart.
 	const maxConcurrency = 20
 	sem := make(chan struct{}, maxConcurrency)
 	var mu sync.Mutex
-	// Initialize as empty slice (not nil) so JSON marshals as [] instead of null
-	// when no repos match.
 	results := []CodeSearchResult{}
 
 	var wg sync.WaitGroup
@@ -324,41 +376,22 @@ func (s *OrgService) codeSearch(ctx context.Context, args map[string]interface{}
 			sem <- struct{}{}
 			defer func() { <-sem }()
 
-			projectName := "data-fleet-cache-repos-" + repoName
-			dbPath := filepath.Join(cacheDir, projectName+".db")
-
-			// Try FTS5 first (fast — inverted index lookup).
-			matches, queryErr := queryFTS5(ctx, dbPath, projectName, pattern, limitPerRepo)
-			if queryErr != nil {
-				slog.Debug("org_code_search: FTS5 error, trying LIKE", "repo", repoName, "err", queryErr)
-			}
-
-			// Fallback: if FTS5 returns nothing, try substring LIKE on nodes
-			// table. This catches camelCase identifiers like "InternalRequest"
-			// that FTS5's unicode61 tokenizer splits into separate tokens.
-			if len(matches) == 0 {
-				matches, queryErr = queryLike(ctx, dbPath, projectName, pattern, limitPerRepo)
-				if queryErr != nil {
-					slog.Debug("org_code_search: LIKE error", "repo", repoName, "err", queryErr)
-					return
-				}
-			}
-			if len(matches) == 0 {
+			projectName, dbPath := resolveProjectDBPath(cacheDir, repoName)
+			if directResult, ok := searchRepoViaSQLite(ctx, repoName, projectName, dbPath, normalizedPattern, caseInsensitive, limitPerRepo); ok {
+				mu.Lock()
+				results = append(results, directResult)
+				mu.Unlock()
 				return
 			}
 
-			mu.Lock()
-			defer mu.Unlock()
-
-			matchJSON, _ := json.Marshal(map[string]interface{}{
-				"repo":    repoName,
-				"matches": matches,
-				"count":   len(matches),
-			})
-			results = append(results, CodeSearchResult{
-				Project: repoName,
-				Content: string(matchJSON),
-			})
+			if bridge == nil {
+				return
+			}
+			if bridgeResult, ok := searchRepoViaBridge(ctx, bridge, repoName, projectName, normalizedPattern, limitPerRepo); ok {
+				mu.Lock()
+				results = append(results, bridgeResult)
+				mu.Unlock()
+			}
 		}(repo)
 	}
 	wg.Wait()
@@ -369,6 +402,100 @@ func (s *OrgService) codeSearch(ctx context.Context, args map[string]interface{}
 
 	slog.Info("org_code_search: complete", "repos_searched", len(repos), "repos_with_matches", len(results))
 	return results, nil
+}
+
+func resolveProjectDBPath(cacheDir, repoName string) (string, string) {
+	candidates := []string{
+		"data-fleet-cache-repos-" + repoName,
+		"tmp-fleet-cache-repos-" + repoName,
+		"tmp-fleet-cache-" + repoName,
+		"app-fleet-cache-" + repoName,
+		repoName,
+	}
+	projectName := candidates[0]
+	if cacheDir == "" {
+		return projectName, ""
+	}
+	for _, candidate := range candidates {
+		dbPath := filepath.Join(cacheDir, candidate+".db")
+		if _, err := os.Stat(dbPath); err == nil {
+			return candidate, dbPath
+		}
+	}
+	return projectName, ""
+}
+
+func searchRepoViaSQLite(ctx context.Context, repoName, projectName, dbPath, pattern string, caseInsensitive bool, limitPerRepo int) (CodeSearchResult, bool) {
+	if dbPath == "" {
+		return CodeSearchResult{}, false
+	}
+
+	var (
+		matches  []FTSMatch
+		queryErr error
+	)
+	if caseInsensitive {
+		matches, queryErr = queryFTS5(ctx, dbPath, projectName, pattern, limitPerRepo)
+		if queryErr != nil {
+			slog.Debug("org_code_search: FTS5 error, trying LIKE", "repo", repoName, "err", queryErr)
+		}
+	}
+	if !caseInsensitive || len(matches) == 0 {
+		matches, queryErr = queryLike(ctx, dbPath, projectName, pattern, limitPerRepo, caseInsensitive)
+		if queryErr != nil {
+			slog.Debug("org_code_search: LIKE error", "repo", repoName, "err", queryErr)
+			return CodeSearchResult{}, false
+		}
+	}
+	if len(matches) == 0 {
+		return CodeSearchResult{}, false
+	}
+
+	matchJSON, _ := json.Marshal(map[string]interface{}{
+		"repo":    repoName,
+		"matches": matches,
+		"count":   len(matches),
+	})
+	return CodeSearchResult{
+		Project: repoName,
+		Content: string(matchJSON),
+	}, true
+}
+
+func searchRepoViaBridge(ctx context.Context, bridge BridgeCaller, repoName, projectName, pattern string, limitPerRepo int) (CodeSearchResult, bool) {
+	result, err := bridge.CallTool(ctx, "search_code", map[string]interface{}{
+		"project": projectName,
+		"pattern": pattern,
+		"limit":   float64(limitPerRepo),
+	})
+	if err != nil {
+		return CodeSearchResult{Project: repoName, Content: err.Error(), IsError: true}, true
+	}
+	if result == nil {
+		return CodeSearchResult{}, false
+	}
+	if result.IsError {
+		return CodeSearchResult{
+			Project: repoName,
+			Content: firstContentText(result),
+			IsError: true,
+		}, true
+	}
+	text := strings.TrimSpace(firstContentText(result))
+	if text == "" || text == "null" || strings.EqualFold(text, "No results found.") {
+		return CodeSearchResult{}, false
+	}
+	return CodeSearchResult{
+		Project: repoName,
+		Content: text,
+	}, true
+}
+
+func firstContentText(result *mcp.ToolResult) string {
+	if result == nil || len(result.Content) == 0 {
+		return ""
+	}
+	return result.Content[0].Text
 }
 
 // queryFTS5 opens a per-project .db and queries its nodes_fts index.
@@ -404,20 +531,30 @@ func queryFTS5(ctx context.Context, dbPath, project, pattern string, limit int) 
 // Catches camelCase identifiers that FTS5 tokenizes into separate tokens
 // (e.g., "InternalRequest" indexed as "Internal"+"Request").
 // Slower than FTS5 but always correct for substring semantics.
-func queryLike(ctx context.Context, dbPath, project, pattern string, limit int) ([]FTSMatch, error) {
+func queryLike(ctx context.Context, dbPath, project, pattern string, limit int, caseInsensitive bool) ([]FTSMatch, error) {
 	db, err := sql.Open("sqlite", dbPath+"?_pragma=busy_timeout(2000)&mode=ro")
 	if err != nil {
 		return nil, err
 	}
 	defer db.Close()
 
-	like := "%" + pattern + "%"
-	rows, err := db.QueryContext(ctx,
-		`SELECT name, qualified_name, label, file_path
-		 FROM nodes
-		 WHERE (name LIKE ? OR qualified_name LIKE ? OR file_path LIKE ?)
-		 LIMIT ?`,
-		like, like, like, limit)
+	var rows *sql.Rows
+	if caseInsensitive {
+		like := "%" + pattern + "%"
+		rows, err = db.QueryContext(ctx,
+			`SELECT name, qualified_name, label, file_path
+			 FROM nodes
+			 WHERE (LOWER(name) LIKE ? OR LOWER(qualified_name) LIKE ? OR LOWER(file_path) LIKE ?)
+			 LIMIT ?`,
+			like, like, like, limit)
+	} else {
+		rows, err = db.QueryContext(ctx,
+			`SELECT name, qualified_name, label, file_path
+			 FROM nodes
+			 WHERE (INSTR(name, ?) > 0 OR INSTR(qualified_name, ?) > 0 OR INSTR(file_path, ?) > 0)
+			 LIMIT ?`,
+			pattern, pattern, pattern, limit)
+	}
 	if err != nil {
 		return nil, err
 	}

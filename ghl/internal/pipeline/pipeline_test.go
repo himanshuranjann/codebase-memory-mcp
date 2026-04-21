@@ -1,6 +1,7 @@
 package pipeline
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"testing"
@@ -384,5 +385,76 @@ export class WorkflowService {
 	// The GET /contacts/list provider should match the GET contacts/list consumer
 	if matched < 1 {
 		t.Errorf("expected at least 1 cross-reference match, got %d", matched)
+	}
+}
+
+func TestPopulateOrgFromSourceClones_RefreshesOrgSignals(t *testing.T) {
+	db := openTestDB(t)
+	cloneDir := t.TempDir()
+
+	scaffoldRepo(t, cloneDir, "contacts-service", map[string]string{
+		"package.json": `{"dependencies": {},"name":"@platform-core/contacts-service"}`,
+		"src/contacts.controller.ts": `
+import { Controller, Get } from '@nestjs/common';
+
+@Controller('contacts')
+export class ContactsController {
+	@Get('list')
+	getList() {}
+}
+`,
+	})
+	scaffoldRepo(t, cloneDir, "workflow-service", map[string]string{
+		"package.json": `{"dependencies":{"@platform-core/contacts-service":"^1.0.0"}}`,
+		"src/workflow.service.ts": `
+import { Injectable } from '@nestjs/common';
+
+@Injectable()
+export class WorkflowService {
+	async triggerContact() {
+		await InternalRequest.get({
+			serviceName: SERVICE_NAME.CONTACTS_API,
+			route: 'list',
+		});
+	}
+}
+`,
+	})
+
+	repos := []manifest.Repo{
+		{Name: "contacts-service", GitHubURL: "https://github.com/GoHighLevel/contacts-service", Team: "contacts", Type: "backend"},
+		{Name: "workflow-service", GitHubURL: "https://github.com/GoHighLevel/workflow-service", Team: "workflows", Type: "backend"},
+	}
+
+	refreshed, err := PopulateOrgFromSourceClones(context.Background(), db, repos, cloneDir, 2)
+	if err != nil {
+		t.Fatalf("PopulateOrgFromSourceClones: %v", err)
+	}
+	if refreshed != 2 {
+		t.Fatalf("refreshed repos: want 2, got %d", refreshed)
+	}
+
+	deps, err := db.QueryDependents("@platform-core", "contacts-service")
+	if err != nil {
+		t.Fatalf("QueryDependents: %v", err)
+	}
+	if len(deps) != 1 || deps[0].RepoName != "workflow-service" {
+		t.Fatalf("dependents: got %+v, want workflow-service", deps)
+	}
+
+	blast, err := db.QueryBlastRadius("contacts-service")
+	if err != nil {
+		t.Fatalf("QueryBlastRadius: %v", err)
+	}
+	if blast.TotalRepos == 0 {
+		t.Fatal("expected non-empty blast radius after source refresh")
+	}
+
+	steps, err := db.TraceFlow("contacts-service", "downstream", 2)
+	if err != nil {
+		t.Fatalf("TraceFlow: %v", err)
+	}
+	if len(steps) == 0 {
+		t.Fatal("expected non-empty trace flow after source refresh")
 	}
 }

@@ -2,6 +2,7 @@ package orgtools
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"path/filepath"
 	"testing"
@@ -95,11 +96,11 @@ func TestDefinitions_Returns6Tools(t *testing.T) {
 
 	expected := map[string]bool{
 		"org_dependency_graph": false,
-		"org_blast_radius":    false,
-		"org_trace_flow":      false,
-		"org_team_topology":   false,
-		"org_search":          false,
-		"org_code_search":     false,
+		"org_blast_radius":     false,
+		"org_trace_flow":       false,
+		"org_team_topology":    false,
+		"org_search":           false,
+		"org_code_search":      false,
 	}
 	for _, d := range defs {
 		if _, ok := expected[d.Name]; !ok {
@@ -619,5 +620,28 @@ func TestCallTool_UnknownTool(t *testing.T) {
 	_, err := svc.CallTool(context.Background(), "unknown_tool", map[string]interface{}{})
 	if err == nil {
 		t.Fatal("expected error for unknown tool")
+	}
+}
+
+func TestCallTool_WaitsForWarmup(t *testing.T) {
+	svc, _ := newService(t)
+	wantErr := errors.New("still warming")
+	called := false
+	svc.SetWarmupWaiter(func(_ context.Context, toolName string) error {
+		called = true
+		if toolName != "org_search" {
+			t.Fatalf("toolName: got %q, want %q", toolName, "org_search")
+		}
+		return wantErr
+	})
+
+	_, err := svc.CallTool(context.Background(), "org_search", map[string]interface{}{
+		"query": "revex",
+	})
+	if !called {
+		t.Fatal("expected warmup waiter to be called")
+	}
+	if !errors.Is(err, wantErr) {
+		t.Fatalf("CallTool error: got %v, want %v", err, wantErr)
 	}
 }

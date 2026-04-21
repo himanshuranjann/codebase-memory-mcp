@@ -332,9 +332,24 @@ func directExtractPackageDeps(ctx context.Context, orgDB *orgdb.DB, entries []di
 	slog.Info("direct-sql: phase 2c: extracting package deps", "projects", len(entries))
 	var count atomic.Int64
 
-	// Primary source: read package.json from GCS Fuse mount.
-	// GCS Fuse is at /data/fleet-cache/repos/<repoName>/
-	cloneDirs := []string{"/data/fleet-cache/repos", "/tmp/fleet-repos"}
+	// Primary source: read package.json from the configured clone cache when it
+	// exists, then fall back to known fleet mount locations.
+	cloneDirs := []string{}
+	for _, dir := range []string{cacheDir, "/data/fleet-cache/repos", "/tmp/fleet-repos"} {
+		if dir == "" {
+			continue
+		}
+		seen := false
+		for _, existing := range cloneDirs {
+			if existing == dir {
+				seen = true
+				break
+			}
+		}
+		if !seen {
+			cloneDirs = append(cloneDirs, dir)
+		}
+	}
 
 	parallelScanDirect(entries, directWorkers, func(e directEntry) {
 		// Try to read package.json from clone dirs
@@ -469,8 +484,8 @@ func directExtractEventContracts(ctx context.Context, orgDB *orgdb.DB, entries [
 					continue
 				}
 				orgDB.InsertEventContract(orgdb.EventContract{
-					Topic:         topic,
-					EventType:     "pubsub",
+					Topic:          topic,
+					EventType:      "pubsub",
 					ConsumerRepo:   e.repoName,
 					ConsumerSymbol: name,
 				})

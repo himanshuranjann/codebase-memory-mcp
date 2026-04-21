@@ -11,7 +11,7 @@ import (
 type APIContract struct {
 	ProviderRepo   string
 	ConsumerRepo   string
-	Method         string  // GET, POST, etc.
+	Method         string // GET, POST, etc.
 	Path           string
 	ProviderSymbol string
 	ConsumerSymbol string
@@ -99,6 +99,12 @@ func clearRepoDataTx(tx *sql.Tx, repoName string) error {
 		{`DELETE FROM event_contracts WHERE producer_repo = ? OR consumer_repo = ?`, []any{repoName, repoName}},
 		{`DELETE FROM deployments WHERE repo_name = ?`, []any{repoName}},
 		{`DELETE FROM team_ownership WHERE repo_name = ?`, []any{repoName}},
+		{`DELETE FROM scheduled_jobs WHERE repo_name = ?`, []any{repoName}},
+		{`DELETE FROM http_client_calls WHERE repo_name = ?`, []any{repoName}},
+		{`DELETE FROM grpc_methods WHERE repo_name = ?`, []any{repoName}},
+		{`DELETE FROM graphql_ops WHERE repo_name = ?`, []any{repoName}},
+		{`DELETE FROM shared_databases WHERE repo_name = ?`, []any{repoName}},
+		{`DELETE FROM service_mesh WHERE source_repo = ? OR target_repo = ?`, []any{repoName, repoName}},
 	}
 	for _, q := range queries {
 		if _, err := tx.Exec(q.sql, q.args...); err != nil {
@@ -174,6 +180,223 @@ func (d *DB) InsertEventContract(contract EventContract) error {
 		return fmt.Errorf("orgdb: insert event contract %q: %w", contract.Topic, err)
 	}
 	return nil
+}
+
+// ─── Tier 1 / 2 / 3 signal writers ────────────────────────────────────────
+
+// ScheduledJob is an @Cron/@Interval/@Timeout declaration discovered in
+// a repo's source code.
+type ScheduledJob struct {
+	RepoName string
+	Kind     string // "cron" | "interval" | "timeout"
+	Schedule string
+	Symbol   string
+	FilePath string
+}
+
+// InsertScheduledJob writes a single @Cron/@Interval/@Timeout row.
+func (d *DB) InsertScheduledJob(job ScheduledJob) error {
+	_, err := d.db.Exec(`
+		INSERT INTO scheduled_jobs (repo_name, kind, schedule, symbol, file_path)
+		VALUES (?, ?, ?, ?, ?)
+	`, job.RepoName, job.Kind, job.Schedule, job.Symbol, job.FilePath)
+	if err != nil {
+		return fmt.Errorf("orgdb: insert scheduled_job %q/%q: %w", job.RepoName, job.Kind, err)
+	}
+	return nil
+}
+
+// HttpClientCall is an outbound HTTP call with a literal URL.
+type HttpClientCall struct {
+	RepoName string
+	Method   string
+	URL      string
+	Symbol   string
+	FilePath string
+}
+
+// InsertHttpClientCall writes one outbound axios/httpService/fetch call.
+func (d *DB) InsertHttpClientCall(c HttpClientCall) error {
+	_, err := d.db.Exec(`
+		INSERT INTO http_client_calls (repo_name, method, url, symbol, file_path)
+		VALUES (?, ?, ?, ?, ?)
+	`, c.RepoName, c.Method, c.URL, c.Symbol, c.FilePath)
+	if err != nil {
+		return fmt.Errorf("orgdb: insert http_client_call %s %s: %w", c.Method, c.URL, err)
+	}
+	return nil
+}
+
+// GrpcMethodRow represents one @GrpcMethod / @GrpcStreamMethod declaration.
+type GrpcMethodRow struct {
+	RepoName  string
+	Service   string
+	Method    string
+	Streaming bool
+	Symbol    string
+	FilePath  string
+}
+
+// InsertGrpcMethod writes a gRPC provider row.
+func (d *DB) InsertGrpcMethod(g GrpcMethodRow) error {
+	stream := 0
+	if g.Streaming {
+		stream = 1
+	}
+	_, err := d.db.Exec(`
+		INSERT INTO grpc_methods (repo_name, service, method, streaming, symbol, file_path)
+		VALUES (?, ?, ?, ?, ?, ?)
+	`, g.RepoName, g.Service, g.Method, stream, g.Symbol, g.FilePath)
+	if err != nil {
+		return fmt.Errorf("orgdb: insert grpc_method %s.%s: %w", g.Service, g.Method, err)
+	}
+	return nil
+}
+
+// GraphQLOpRow represents one resolver @Query/@Mutation/@Subscription.
+type GraphQLOpRow struct {
+	RepoName string
+	Kind     string // "query" | "mutation" | "subscription"
+	Name     string
+	Symbol   string
+	FilePath string
+}
+
+// InsertGraphQLOp writes a graphql_ops row.
+func (d *DB) InsertGraphQLOp(g GraphQLOpRow) error {
+	_, err := d.db.Exec(`
+		INSERT INTO graphql_ops (repo_name, kind, name, symbol, file_path)
+		VALUES (?, ?, ?, ?, ?)
+	`, g.RepoName, g.Kind, g.Name, g.Symbol, g.FilePath)
+	if err != nil {
+		return fmt.Errorf("orgdb: insert graphql_op %s/%s: %w", g.Kind, g.Name, err)
+	}
+	return nil
+}
+
+// DeploymentRow is a Helm-derived deployable (one per values file or
+// Chart.yaml).
+type DeploymentRow struct {
+	RepoName   string
+	AppName    string
+	DeployType string
+	Env        string
+	Namespace  string
+	HelmChart  string
+}
+
+// InsertDeployment writes a deployments row.
+func (d *DB) InsertDeployment(r DeploymentRow) error {
+	_, err := d.db.Exec(`
+		INSERT INTO deployments (repo_name, app_name, deploy_type, env, namespace, helm_chart)
+		VALUES (?, ?, ?, ?, ?, ?)
+	`, r.RepoName, r.AppName, r.DeployType, r.Env, r.Namespace, r.HelmChart)
+	if err != nil {
+		return fmt.Errorf("orgdb: insert deployment %s/%s/%s: %w", r.RepoName, r.AppName, r.Env, err)
+	}
+	return nil
+}
+
+// VirtualServiceRow is an Istio VS destination.
+type VirtualServiceRow struct {
+	SourceRepo string
+	SourceApp  string
+	TargetFQDN string
+	TargetRepo string
+	Env        string
+}
+
+// InsertVirtualService writes a service_mesh row.
+func (d *DB) InsertVirtualService(r VirtualServiceRow) error {
+	_, err := d.db.Exec(`
+		INSERT INTO service_mesh (source_repo, source_app, target_fqdn, target_repo, env)
+		VALUES (?, ?, ?, ?, ?)
+	`, r.SourceRepo, r.SourceApp, r.TargetFQDN, r.TargetRepo, r.Env)
+	if err != nil {
+		return fmt.Errorf("orgdb: insert service_mesh %s→%s: %w", r.SourceRepo, r.TargetFQDN, err)
+	}
+	return nil
+}
+
+// SharedDatabaseRow is a Mongoose/TypeORM access signal (owned collection,
+// change stream, or connection).
+type SharedDatabaseRow struct {
+	ConnectionID string
+	DBType       string
+	RepoName     string
+	AccessType   string
+	Collection   string
+}
+
+// InsertSharedDatabase writes a shared_databases row.
+func (d *DB) InsertSharedDatabase(r SharedDatabaseRow) error {
+	_, err := d.db.Exec(`
+		INSERT INTO shared_databases (connection_id, db_type, repo_name, access_type, collection)
+		VALUES (?, ?, ?, ?, ?)
+	`, r.ConnectionID, r.DBType, r.RepoName, r.AccessType, r.Collection)
+	if err != nil {
+		return fmt.Errorf("orgdb: insert shared_databases %s/%s/%s: %w", r.RepoName, r.AccessType, r.Collection, err)
+	}
+	return nil
+}
+
+// ─── Count helpers for benchmarking ──────────────────────────────────────
+
+// CountScheduledJobs returns the number of scheduled_jobs rows in the DB.
+func (d *DB) CountScheduledJobs() int {
+	var n int
+	_ = d.db.QueryRow(`SELECT COUNT(*) FROM scheduled_jobs`).Scan(&n)
+	return n
+}
+
+// CountHttpClientCalls returns the number of http_client_calls rows.
+func (d *DB) CountHttpClientCalls() int {
+	var n int
+	_ = d.db.QueryRow(`SELECT COUNT(*) FROM http_client_calls`).Scan(&n)
+	return n
+}
+
+// CountGrpcMethods returns the number of grpc_methods rows.
+func (d *DB) CountGrpcMethods() int {
+	var n int
+	_ = d.db.QueryRow(`SELECT COUNT(*) FROM grpc_methods`).Scan(&n)
+	return n
+}
+
+// CountGraphQLOps returns the number of graphql_ops rows.
+func (d *DB) CountGraphQLOps() int {
+	var n int
+	_ = d.db.QueryRow(`SELECT COUNT(*) FROM graphql_ops`).Scan(&n)
+	return n
+}
+
+// CountDeployments returns the number of deployments rows.
+func (d *DB) CountDeployments() int {
+	var n int
+	_ = d.db.QueryRow(`SELECT COUNT(*) FROM deployments`).Scan(&n)
+	return n
+}
+
+// CountServiceMesh returns the number of service_mesh rows.
+func (d *DB) CountServiceMesh() int {
+	var n int
+	_ = d.db.QueryRow(`SELECT COUNT(*) FROM service_mesh`).Scan(&n)
+	return n
+}
+
+// CountSharedDatabases returns the number of shared_databases rows.
+func (d *DB) CountSharedDatabases() int {
+	var n int
+	_ = d.db.QueryRow(`SELECT COUNT(*) FROM shared_databases`).Scan(&n)
+	return n
+}
+
+// CountEventsByType returns the number of event_contracts rows whose
+// event_type matches the provided value.
+func (d *DB) CountEventsByType(eventType string) int {
+	var n int
+	_ = d.db.QueryRow(`SELECT COUNT(*) FROM event_contracts WHERE event_type = ?`, eventType).Scan(&n)
+	return n
 }
 
 // CountRepoDependencies returns the number of internal package dependencies for a repo.
@@ -366,6 +589,13 @@ func (d *DB) CrossReferenceContracts() (int, error) {
 		}
 		key := provKey{cons.prefix, cons.route}
 		for _, prov := range exactIndex[key] {
+			// Skip self-references: a repo calling its own API via
+			// InternalRequest should not become its own consumer row,
+			// otherwise blast_radius and trace_flow surface spurious
+			// self-loops.
+			if prov.providerRepo == cons.consumerRepo {
+				continue
+			}
 			if cons.method == prov.method || prov.method == "ANY" || cons.method == "ANY" {
 				if err := updateConsumer(cons.id, prov.providerRepo, prov.providerSymbol, 0.8); err != nil {
 					return matched, fmt.Errorf("orgdb: cross-ref update %d: %w", cons.id, err)
@@ -382,15 +612,27 @@ func (d *DB) CrossReferenceContracts() (int, error) {
 		if matchedConsIDs[cons.id] || cons.prefix == "" {
 			continue
 		}
-		candidates := prefixIndex[cons.prefix]
-		if len(candidates) > 0 {
-			prov := candidates[0] // first provider repo for this service prefix
-			if err := updateConsumer(cons.id, prov.providerRepo, prov.providerSymbol, 0.5); err != nil {
-				return matched, fmt.Errorf("orgdb: cross-ref update %d: %w", cons.id, err)
+		// Pick the first provider for this prefix that isn't the consumer
+		// itself. Iterating preserves prior "first candidate" semantics
+		// while ignoring self-matches.
+		var prov contract
+		found := false
+		for _, p := range prefixIndex[cons.prefix] {
+			if p.providerRepo == cons.consumerRepo {
+				continue
 			}
-			matchedConsIDs[cons.id] = true
-			matched++
+			prov = p
+			found = true
+			break
 		}
+		if !found {
+			continue
+		}
+		if err := updateConsumer(cons.id, prov.providerRepo, prov.providerSymbol, 0.5); err != nil {
+			return matched, fmt.Errorf("orgdb: cross-ref update %d: %w", cons.id, err)
+		}
+		matchedConsIDs[cons.id] = true
+		matched++
 	}
 
 	return matched, nil
@@ -449,10 +691,13 @@ func (d *DB) CrossReferenceEventContracts() (int, error) {
 		consumers = append(consumers, c)
 	}
 
-	// Match by topic
+	// Match by topic, skipping producer==consumer self-references.
 	matched := 0
 	for _, cons := range consumers {
 		for _, prod := range producers {
+			if prod.producerRepo == cons.consumerRepo {
+				continue
+			}
 			if cons.topic == prod.topic {
 				_, err := d.db.Exec(`
 					UPDATE event_contracts SET
@@ -527,11 +772,9 @@ func extractServiceIdentifier(path string) string {
 // and removes hyphens so "CONTACTS_API" and "contacts" both normalize to "contacts".
 func normalizeServicePrefix(s string) string {
 	s = strings.ToLower(s)
-	for _, suffix := range []string{"_api", "_service", "_worker"} {
+	for _, suffix := range []string{"_api", "_service", "_worker", "-api", "-service", "-worker"} {
 		s = strings.TrimSuffix(s, suffix)
 	}
-	// Also normalize underscores to match hyphenated names:
-	// "social_media" → "social-media" style normalization not needed,
-	// but ensure consistent comparison
+	s = strings.NewReplacer("-", "", "_", "").Replace(s)
 	return s
 }

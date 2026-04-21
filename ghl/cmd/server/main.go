@@ -242,8 +242,10 @@ func main() {
 		githubToken: cfg.GitHubToken,
 	}
 
-	var orgRepoCount atomic.Int64    // tracks repos enriched for periodic GCS sync
+	var orgRepoCount atomic.Int64      // tracks repos enriched for periodic GCS sync
 	var orgPipelineRunning atomic.Bool // true while startup pipeline is populating org.db
+	var orgPackageBackfillRunning atomic.Bool
+	var orgSourceRefreshRunning atomic.Bool
 
 	// activityChecker filters stale repos during fleet runs.
 	var actChecker indexer.ActivityChecker
@@ -422,6 +424,40 @@ func main() {
 	})
 	idx := newFleetIndexer(indexPool, discoverySvc)
 
+	refreshOrgFromSources := func(reason string) {
+		if orgDB == nil {
+			return
+		}
+		if !orgSourceRefreshRunning.CompareAndSwap(false, true) {
+			slog.Info("source refresh already running", "reason", reason)
+			return
+		}
+		go func() {
+			defer orgSourceRefreshRunning.Store(false)
+			refreshCtx, cancel := context.WithTimeout(context.Background(), 20*time.Minute)
+			defer cancel()
+
+			refreshed, err := pipeline.PopulateOrgFromSourceClones(refreshCtx, orgDB, m.Repos, cfg.CloneCacheDir, cfg.Concurrency)
+			if err != nil {
+				slog.Warn("source refresh failed", "reason", reason, "err", err)
+				return
+			}
+			if refreshed == 0 {
+				slog.Info("source refresh skipped", "reason", reason, "clone_cache", cfg.CloneCacheDir)
+				return
+			}
+			slog.Info("source refresh complete", "reason", reason, "repos", refreshed)
+			if artifactSync != nil {
+				orgDB.Checkpoint()
+				if n, err := artifactSync.PersistOrgGraph(); err != nil {
+					slog.Warn("source refresh persist failed", "reason", reason, "err", err)
+				} else {
+					slog.Info("source refresh persisted org graph", "reason", reason, "files", n)
+				}
+			}
+		}()
+	}
+
 	// ── Populate org.db from hydrated project .db files (only if empty) ──
 	if orgDB != nil {
 		repoCount := orgDB.RepoCount()
@@ -442,6 +478,8 @@ func main() {
 			// and runs in the background — does not block HTTP server.
 			if packageDeps == 0 {
 				go func() {
+					orgPackageBackfillRunning.Store(true)
+					defer orgPackageBackfillRunning.Store(false)
 					slog.Info("startup: package_deps=0 in hydrated org.db — running package backfill")
 					if err := pipeline.PopulatePackageDepsOnly(context.Background(), orgDB, m.Repos, cfg.CBMCacheDir); err != nil {
 						slog.Warn("startup: package dep backfill failed", "err", err)
@@ -458,6 +496,7 @@ func main() {
 					}
 				}()
 			}
+			refreshOrgFromSources("startup-hydrated")
 		} else {
 			// org.db is empty or too small — populate directly from project .db files (fast path)
 			go func() {
@@ -472,7 +511,16 @@ func main() {
 					}
 				}
 				slog.Info("startup: org.db populated successfully")
-				// Persist to GCS immediately
+				orgSourceRefreshRunning.Store(true)
+				refreshCtx, cancel := context.WithTimeout(context.Background(), 20*time.Minute)
+				refreshed, refreshErr := pipeline.PopulateOrgFromSourceClones(refreshCtx, orgDB, m.Repos, cfg.CloneCacheDir, cfg.Concurrency)
+				cancel()
+				orgSourceRefreshRunning.Store(false)
+				if refreshErr != nil {
+					slog.Warn("startup: source refresh failed after org.db population", "err", refreshErr)
+				} else if refreshed > 0 {
+					slog.Info("startup: source refresh complete after org.db population", "repos", refreshed)
+				}
 				if artifactSync != nil {
 					orgDB.Checkpoint()
 					if n, err := artifactSync.PersistOrgGraph(); err != nil {
@@ -574,6 +622,25 @@ func main() {
 		orgToolSvc = orgtools.New(orgDB)
 		orgToolSvc.SetBridge(bridgePool)
 		orgToolSvc.SetCacheDir(cfg.CBMCacheDir)
+		orgToolSvc.SetWarmupWaiter(func(ctx context.Context, toolName string) error {
+			needsPackageDeps := toolName == "org_dependency_graph" || toolName == "org_blast_radius" || toolName == "org_team_topology"
+			needsSourceRefresh := toolName == "org_dependency_graph" || toolName == "org_blast_radius" || toolName == "org_trace_flow" || toolName == "org_team_topology"
+			ticker := time.NewTicker(200 * time.Millisecond)
+			defer ticker.Stop()
+			for {
+				initialReady := !orgPipelineRunning.Load()
+				packageDepsReady := !needsPackageDeps || !orgPackageBackfillRunning.Load()
+				sourceReady := !needsSourceRefresh || !orgSourceRefreshRunning.Load()
+				if initialReady && packageDepsReady && sourceReady {
+					return nil
+				}
+				select {
+				case <-ctx.Done():
+					return ctx.Err()
+				case <-ticker.C:
+				}
+			}
+		})
 		orgSyncCallback = func(db *orgdb.DB) { orgToolSvc.SetDB(db) }
 		slog.Info("org tools enabled", "tools", len(orgToolSvc.Definitions()))
 	}
@@ -1045,10 +1112,9 @@ func loadConfig() config {
 		RunForce:                 getBool("RUN_FORCE", false),
 		OrgGraphEnabled:          true,
 		OrgDBPath:                getEnv("ORG_DB_PATH", ""),
-		GitHubOrgScanToken:      getEnv("GITHUB_ORG_SCAN_TOKEN", getEnv("GITHUB_TOKEN", "")),
+		GitHubOrgScanToken:       getEnv("GITHUB_ORG_SCAN_TOKEN", getEnv("GITHUB_TOKEN", "")),
 	}
 }
-
 
 func defaultManifestPath() string {
 	candidates := []string{
