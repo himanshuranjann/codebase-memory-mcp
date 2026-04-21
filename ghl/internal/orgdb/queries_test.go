@@ -154,6 +154,17 @@ func TestQueryBlastRadius_CombinesAllImpactTypes(t *testing.T) {
 			t.Errorf("missing reason: %s", expected)
 		}
 	}
+
+	teams := map[string]string{}
+	for _, ar := range result.AffectedRepos {
+		teams[ar.Name] = ar.Team
+	}
+	if teams["api-consumer"] != "payments" {
+		t.Errorf("api-consumer team: got %q, want %q", teams["api-consumer"], "payments")
+	}
+	if teams["event-consumer"] != "notifications" {
+		t.Errorf("event-consumer team: got %q, want %q", teams["event-consumer"], "notifications")
+	}
 }
 
 func TestQueryBlastRadius_EmptyForIsolatedRepo(t *testing.T) {
@@ -166,6 +177,9 @@ func TestQueryBlastRadius_EmptyForIsolatedRepo(t *testing.T) {
 	}
 	if result.TotalRepos != 0 {
 		t.Errorf("TotalRepos: want 0, got %d", result.TotalRepos)
+	}
+	if result.AffectedRepos == nil {
+		t.Fatal("AffectedRepos: got nil, want empty slice")
 	}
 }
 
@@ -429,6 +443,22 @@ func TestTeamTopology_NoRepos(t *testing.T) {
 	}
 }
 
+func TestTeamTopology_FallsBackToTeamOwnership(t *testing.T) {
+	db := openTestDB(t)
+	seedRepoWithTeam(t, db, "revex-backend", "", "backend")
+	if err := db.UpsertTeamOwnership("revex-backend", "revex", ""); err != nil {
+		t.Fatalf("UpsertTeamOwnership: %v", err)
+	}
+
+	info, err := db.TeamTopology("revex")
+	if err != nil {
+		t.Fatalf("TeamTopology: %v", err)
+	}
+	if len(info.Repos) != 1 || info.Repos[0].Name != "revex-backend" {
+		t.Fatalf("Repos: got %+v, want revex-backend via team_ownership fallback", info.Repos)
+	}
+}
+
 // ---------- SearchRepos ----------
 
 func TestSearchRepos_ByNameSubstring(t *testing.T) {
@@ -460,6 +490,25 @@ func TestSearchRepos_ByTeamFilter(t *testing.T) {
 	}
 	if results[0].Name != "ghl-payments-backend" {
 		t.Errorf("Name: got %q, want %q", results[0].Name, "ghl-payments-backend")
+	}
+}
+
+func TestSearchRepos_FallsBackToTeamOwnership(t *testing.T) {
+	db := openTestDB(t)
+	seedRepoWithTeam(t, db, "ghl-payments-backend", "", "backend")
+	if err := db.UpsertTeamOwnership("ghl-payments-backend", "payments", ""); err != nil {
+		t.Fatalf("UpsertTeamOwnership: %v", err)
+	}
+
+	results, err := db.SearchRepos("payments", "", "payments", 10)
+	if err != nil {
+		t.Fatalf("SearchRepos: %v", err)
+	}
+	if len(results) != 1 {
+		t.Fatalf("want 1 result, got %d", len(results))
+	}
+	if results[0].Team != "payments" {
+		t.Errorf("Team: got %q, want %q", results[0].Team, "payments")
 	}
 }
 

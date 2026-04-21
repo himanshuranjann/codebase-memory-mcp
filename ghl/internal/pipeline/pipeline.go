@@ -3,9 +3,14 @@
 package pipeline
 
 import (
+	"context"
 	"fmt"
+	"log/slog"
+	"os"
 	"path/filepath"
 	"strings"
+	"sync"
+	"sync/atomic"
 
 	"github.com/GoHighLevel/codebase-memory-mcp/ghl/internal/enricher"
 	"github.com/GoHighLevel/codebase-memory-mcp/ghl/internal/manifest"
@@ -110,6 +115,100 @@ func PopulateRepoData(db *orgdb.DB, repo manifest.Repo, cloneDir string) error {
 	}
 
 	return nil
+}
+
+// PopulateOrgFromSourceClones re-enriches org.db from real source clones when
+// they are available locally. This path is slower than project-db extraction
+// but materially more reliable for NestJS routes, InternalRequest consumers,
+// package providers, and event patterns.
+func PopulateOrgFromSourceClones(ctx context.Context, db *orgdb.DB, repos []manifest.Repo, cloneDir string, workers int) (int, error) {
+	if cloneDir == "" {
+		return 0, nil
+	}
+	if workers <= 0 {
+		workers = 4
+	}
+	if workers > 8 {
+		workers = 8
+	}
+
+	type job struct {
+		repo manifest.Repo
+	}
+
+	jobs := make(chan job, len(repos))
+	for _, repo := range repos {
+		jobs <- job{repo: repo}
+	}
+	close(jobs)
+
+	var refreshed atomic.Int64
+	var wg sync.WaitGroup
+	for i := 0; i < workers; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for j := range jobs {
+				select {
+				case <-ctx.Done():
+					return
+				default:
+				}
+
+				repoPath := filepath.Join(cloneDir, j.repo.Name)
+				if !hasCloneSource(repoPath) {
+					continue
+				}
+				if err := PopulateRepoData(db, j.repo, cloneDir); err != nil {
+					slog.Warn("source refresh: repo enrichment failed", "repo", j.repo.Name, "err", err)
+					continue
+				}
+				refreshed.Add(1)
+			}
+		}()
+	}
+	wg.Wait()
+	if err := ctx.Err(); err != nil {
+		return int(refreshed.Load()), err
+	}
+
+	if refreshed.Load() == 0 {
+		return 0, nil
+	}
+	if providerCount, err := db.InferPackageProviders(); err != nil {
+		slog.Warn("source refresh: infer package providers failed", "err", err)
+	} else {
+		slog.Info("source refresh: inferred package providers", "count", providerCount)
+	}
+	if matched, err := db.CrossReferenceContracts(); err != nil {
+		slog.Warn("source refresh: cross-reference contracts failed", "err", err)
+	} else {
+		slog.Info("source refresh: cross-referenced API contracts", "matched", matched)
+	}
+	if matched, err := db.CrossReferenceEventContracts(); err != nil {
+		slog.Warn("source refresh: cross-reference event contracts failed", "err", err)
+	} else {
+		slog.Info("source refresh: cross-referenced event contracts", "matched", matched)
+	}
+	return int(refreshed.Load()), nil
+}
+
+func hasCloneSource(repoPath string) bool {
+	info, err := os.Stat(repoPath)
+	if err != nil || !info.IsDir() {
+		return false
+	}
+	entries, err := os.ReadDir(repoPath)
+	if err != nil {
+		return false
+	}
+	for _, entry := range entries {
+		if entry.Name() == ".git" {
+			continue
+		}
+		return true
+	}
+	return false
 }
 
 // buildPath joins a base and suffix with a leading slash, avoiding double slashes.

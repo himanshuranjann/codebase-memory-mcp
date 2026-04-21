@@ -379,11 +379,13 @@ func TestExtractServiceIdentifier(t *testing.T) {
 		{"/CONTACTS_API/list", "contacts"},
 		{"/PAYMENTS_SERVICE/charge", "payments"},
 		{"/USERS_WORKER/process", "users"},
+		{"/SOCIAL_MEDIA_API/list", "socialmedia"},
+		{"/social-media/list", "socialmedia"},
 		// Edge cases
-		{"/api/v1", "api"},       // only has api/version, fallback
-		{"/health", "health"},    // single segment
-		{"", ""},                 // empty
-		{"/", ""},                // just slash
+		{"/api/v1", "api"},    // only has api/version, fallback
+		{"/health", "health"}, // single segment
+		{"", ""},              // empty
+		{"/", ""},             // just slash
 	}
 
 	for _, tt := range tests {

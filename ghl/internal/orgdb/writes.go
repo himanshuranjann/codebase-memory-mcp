@@ -11,7 +11,7 @@ import (
 type APIContract struct {
 	ProviderRepo   string
 	ConsumerRepo   string
-	Method         string  // GET, POST, etc.
+	Method         string // GET, POST, etc.
 	Path           string
 	ProviderSymbol string
 	ConsumerSymbol string
@@ -527,11 +527,9 @@ func extractServiceIdentifier(path string) string {
 // and removes hyphens so "CONTACTS_API" and "contacts" both normalize to "contacts".
 func normalizeServicePrefix(s string) string {
 	s = strings.ToLower(s)
-	for _, suffix := range []string{"_api", "_service", "_worker"} {
+	for _, suffix := range []string{"_api", "_service", "_worker", "-api", "-service", "-worker"} {
 		s = strings.TrimSuffix(s, suffix)
 	}
-	// Also normalize underscores to match hyphenated names:
-	// "social_media" → "social-media" style normalization not needed,
-	// but ensure consistent comparison
+	s = strings.NewReplacer("-", "", "_", "").Replace(s)
 	return s
 }

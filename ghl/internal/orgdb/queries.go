@@ -21,7 +21,7 @@ type BlastRadiusResult struct {
 type AffectedRepo struct {
 	Name       string
 	Team       string
-	Reason     string  // "depends_on_package", "api_consumer", "event_consumer"
+	Reason     string // "depends_on_package", "api_consumer", "event_consumer"
 	Confidence float64
 }
 
@@ -29,8 +29,8 @@ type AffectedRepo struct {
 type FlowStep struct {
 	FromRepo   string
 	ToRepo     string
-	EdgeType   string  // "api_contract", "event_contract", "package_dep"
-	Detail     string  // path or topic name
+	EdgeType   string // "api_contract", "event_contract", "package_dep"
+	Detail     string // path or topic name
 	Confidence float64
 }
 
@@ -91,8 +91,8 @@ func (d *DB) QueryDependents(packageScope, packageName string) ([]DependencyResu
 // It checks package dependents, API consumers, and event consumers.
 func (d *DB) QueryBlastRadius(repoName string) (BlastRadiusResult, error) {
 	rows, err := d.db.Query(`
-		SELECT DISTINCT name, team, reason FROM (
-			SELECT DISTINCT r.name, r.team, 'depends_on_package' as reason
+		SELECT DISTINCT affected.name, COALESCE(r.team, '') AS team, affected.reason FROM (
+			SELECT DISTINCT r.name AS name, 'depends_on_package' as reason
 			FROM repo_dependencies rd
 			JOIN repos r ON rd.repo_id = r.id
 			JOIN packages p ON rd.package_id = p.id
@@ -100,24 +100,25 @@ func (d *DB) QueryBlastRadius(repoName string) (BlastRadiusResult, error) {
 
 			UNION
 
-			SELECT DISTINCT consumer_repo, '', 'api_consumer'
+			SELECT DISTINCT consumer_repo AS name, 'api_consumer'
 			FROM api_contracts
 			WHERE provider_repo = ? AND consumer_repo IS NOT NULL AND consumer_repo != ''
 
 			UNION
 
-			SELECT DISTINCT consumer_repo, '', 'event_consumer'
+			SELECT DISTINCT consumer_repo AS name, 'event_consumer'
 			FROM event_contracts
 			WHERE producer_repo = ? AND consumer_repo IS NOT NULL AND consumer_repo != ''
-		)
-		ORDER BY name
+		) affected
+		LEFT JOIN repos r ON r.name = affected.name
+		ORDER BY affected.name
 	`, repoName, repoName, repoName)
 	if err != nil {
 		return BlastRadiusResult{}, fmt.Errorf("orgdb: query blast radius %q: %w", repoName, err)
 	}
 	defer rows.Close()
 
-	var result BlastRadiusResult
+	result := BlastRadiusResult{AffectedRepos: []AffectedRepo{}}
 	for rows.Next() {
 		var ar AffectedRepo
 		if err := rows.Scan(&ar.Name, &ar.Team, &ar.Reason); err != nil {
@@ -212,7 +213,11 @@ func (d *DB) TeamTopology(team string) (TeamInfo, error) {
 
 	// Get team's repos
 	rows, err := d.db.Query(
-		`SELECT name, type, node_count, edge_count FROM repos WHERE team = ? ORDER BY name`,
+		`SELECT r.name, r.type, r.node_count, r.edge_count
+		 FROM repos r
+		 LEFT JOIN team_ownership t ON t.repo_name = r.name
+		 WHERE COALESCE(NULLIF(r.team, ''), t.team) = ?
+		 ORDER BY r.name`,
 		team,
 	)
 	if err != nil {
@@ -233,12 +238,16 @@ func (d *DB) TeamTopology(team string) (TeamInfo, error) {
 
 	// Get dependent teams via package dependencies
 	depRows, err := d.db.Query(`
-		SELECT DISTINCT r2.team FROM repo_dependencies rd
+		SELECT DISTINCT COALESCE(NULLIF(r2.team, ''), t2.team) FROM repo_dependencies rd
 		JOIN repos r1 ON rd.repo_id = r1.id
+		LEFT JOIN team_ownership t1 ON t1.repo_name = r1.name
 		JOIN packages p ON rd.package_id = p.id
 		JOIN repos r2 ON p.provider_repo = r2.name
-		WHERE r1.team = ? AND r2.team != ? AND r2.team != ''
-		ORDER BY r2.team
+		LEFT JOIN team_ownership t2 ON t2.repo_name = r2.name
+		WHERE COALESCE(NULLIF(r1.team, ''), t1.team) = ?
+		AND COALESCE(NULLIF(r2.team, ''), t2.team) != ?
+		AND COALESCE(NULLIF(r2.team, ''), t2.team) != ''
+		ORDER BY COALESCE(NULLIF(r2.team, ''), t2.team)
 	`, team, team)
 	if err != nil {
 		return info, fmt.Errorf("orgdb: team topology deps %q: %w", team, err)
@@ -274,12 +283,13 @@ func (d *DB) SearchRepos(query string, scope string, team string, limit int) ([]
 	}
 
 	rows, err := d.db.Query(`
-		SELECT name, team, type, languages, 1.0 as score
-		FROM repos
-		WHERE (name LIKE '%' || ? || '%' OR team LIKE '%' || ? || '%')
-		AND (? = '' OR ? = 'all' OR type = ?)
-		AND (? = '' OR team = ?)
-		ORDER BY name
+		SELECT r.name, COALESCE(NULLIF(r.team, ''), t.team) AS team, r.type, r.languages, 1.0 as score
+		FROM repos r
+		LEFT JOIN team_ownership t ON t.repo_name = r.name
+		WHERE (r.name LIKE '%' || ? || '%' OR COALESCE(NULLIF(r.team, ''), t.team) LIKE '%' || ? || '%')
+		AND (? = '' OR ? = 'all' OR r.type = ?)
+		AND (? = '' OR COALESCE(NULLIF(r.team, ''), t.team) = ?)
+		ORDER BY r.name
 		LIMIT ?
 	`, query, query, scope, scope, scope, team, team, limit)
 	if err != nil {
