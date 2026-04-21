@@ -304,17 +304,36 @@ func directExtractPackageDeps(ctx context.Context, orgDB *orgdb.DB, entries []di
 	slog.Info("direct-sql: phase 2c: extracting package deps", "projects", len(entries))
 	var count atomic.Int64
 
-	scopes := []string{"@platform-core/", "@platform-ui/", "@gohighlevel/", "@frontend-core/"}
+	// Primary source: read package.json from GCS Fuse mount.
+	// GCS Fuse is at /data/fleet-cache/repos/<repoName>/
+	cloneDirs := []string{"/data/fleet-cache/repos", "/tmp/fleet-repos"}
 
 	parallelScanDirect(entries, directWorkers, func(e directEntry) {
+		// Try to read package.json from clone dirs
+		for _, baseDir := range cloneDirs {
+			pkgPath := filepath.Join(baseDir, e.repoName, "package.json")
+			deps, err := orgdb.ParsePackageJSON(pkgPath)
+			if err != nil {
+				continue
+			}
+			for _, dep := range deps {
+				orgDB.UpsertPackageDep(e.repoName, dep)
+				count.Add(1)
+			}
+			// Also set this repo as package provider if it IS a GHL internal package
+			if scope, name, err := orgdb.ParsePackageName(pkgPath); err == nil && scope != "" {
+				orgDB.SetPackageProvider(scope, name, e.repoName)
+			}
+			return // found package.json, done for this repo
+		}
+
+		// Fallback: query IMPORTS edges from project .db
 		db, err := openReadOnly(e.dbPath)
 		if err != nil {
 			return
 		}
 		defer db.Close()
 
-		// Extract IMPORTS edges — the C binary indexes import statements.
-		// Target node names contain the package path.
 		rows, err := db.QueryContext(ctx,
 			`SELECT DISTINCT tgt.name, tgt.qualified_name
 			 FROM edges e
@@ -325,17 +344,16 @@ func directExtractPackageDeps(ctx context.Context, orgDB *orgdb.DB, entries []di
 			return
 		}
 
+		scopes := []string{"@platform-core/", "@platform-ui/", "@gohighlevel/", "@frontend-core/"}
 		seen := make(map[string]bool)
 		for rows.Next() {
 			var name, qn string
 			if err := rows.Scan(&name, &qn); err != nil {
 				continue
 			}
-			// Check if the import matches any GHL internal scope
 			for _, scope := range scopes {
 				scopePart := strings.TrimSuffix(scope, "/")
 				if strings.Contains(name, scope) || strings.Contains(qn, scope) {
-					// Extract package name from the import
 					pkg := extractPackageFromImport(name, qn, scope)
 					if pkg != "" && !seen[scopePart+"/"+pkg] {
 						seen[scopePart+"/"+pkg] = true
@@ -350,35 +368,6 @@ func directExtractPackageDeps(ctx context.Context, orgDB *orgdb.DB, entries []di
 			}
 		}
 		rows.Close()
-
-		// Fallback: also check node names for package references
-		for _, scope := range scopes {
-			rows2, err := db.QueryContext(ctx,
-				`SELECT DISTINCT name FROM nodes
-				 WHERE name LIKE ? AND label = 'Package'
-				 LIMIT 50`, "%"+scope+"%")
-			if err != nil {
-				continue
-			}
-			scopePart := strings.TrimSuffix(scope, "/")
-			for rows2.Next() {
-				var name string
-				if err := rows2.Scan(&name); err != nil {
-					continue
-				}
-				pkg := extractPackageFromImport(name, "", scope)
-				if pkg != "" && !seen[scopePart+"/"+pkg] {
-					seen[scopePart+"/"+pkg] = true
-					orgDB.UpsertPackageDep(e.repoName, orgdb.Dep{
-						Scope:   scopePart,
-						Name:    pkg,
-						DepType: "dependencies",
-					})
-					count.Add(1)
-				}
-			}
-			rows2.Close()
-		}
 	})
 
 	n := int(count.Load())
