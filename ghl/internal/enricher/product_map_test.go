@@ -21,12 +21,12 @@ func TestProductMap_LoadFromYAML(t *testing.T) {
 	}
 	// Every mapping must declare required fields. A missing field is a data
 	// bug that would produce empty customer-surface labels downstream.
+	// PathPrefix is intentionally allowed to be "" — strings.HasPrefix(s, "")
+	// is always true, so an empty prefix matches any file in the repo (whole-repo
+	// entry for single-product repos).
 	for i, m := range pm.Mappings {
 		if m.Repo == "" {
 			t.Errorf("mapping[%d]: empty Repo", i)
-		}
-		if m.PathPrefix == "" {
-			t.Errorf("mapping[%d]: empty PathPrefix", i)
 		}
 		if m.Product == "" {
 			t.Errorf("mapping[%d]: empty Product", i)
