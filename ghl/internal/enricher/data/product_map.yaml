@@ -1,0 +1,136 @@
+# product_map.yaml — hand-maintained mapping from (repo, path_prefix) to GHL product area.
+#
+# Used by the customer-surface MCP tool to label affected code changes with a
+# human-readable product name + owning team. Small, low-volatility,
+# reviewable-in-PRs. Same data-as-config pattern as CODEOWNERS files.
+#
+# Schema: see ProductMapping struct in product_map.go.
+#
+# Maintenance:
+#   - Add an entry when a new top-level app/package ships.
+#   - Update Owner when a team rename happens.
+#   - Longest-prefix match wins at lookup time; order here is for readability only.
+#   - Missing coverage is FINE — the lookup returns found=false and callers
+#     label the surface as "Unknown — no product mapping."
+#
+# Reviewed quarterly by platform-architecture.
+
+mappings:
+  # ──────────────────────────────────────────────────────────
+  # platform-backend — shared core services
+  # ──────────────────────────────────────────────────────────
+  - repo: platform-backend
+    path_prefix: "apps/iam/workers/"
+    product: "Platform — IAM Cache Workers"
+    owner: "@platform-auth"
+
+  - repo: platform-backend
+    path_prefix: "apps/iam/"
+    product: "Platform — IAM"
+    owner: "@platform-auth"
+
+  - repo: platform-backend
+    path_prefix: "apps/keychain-v2/"
+    product: "Platform — Keychain V2"
+    owner: "@platform-auth"
+
+  - repo: platform-backend
+    path_prefix: "apps/auth/"
+    product: "Platform — Auth"
+    owner: "@platform-auth"
+
+  - repo: platform-backend
+    path_prefix: "apps/snapshots/"
+    product: "Platform — Snapshots"
+    owner: "@platform-snapshots"
+
+  - repo: platform-backend
+    path_prefix: "apps/events/"
+    product: "Platform — Events"
+    owner: "@platform-events"
+
+  - repo: platform-backend
+    path_prefix: "common/"
+    product: "Platform — Shared Utilities"
+    owner: "@platform"
+
+  # ──────────────────────────────────────────────────────────
+  # ghl-revex-backend — revex team backends
+  # ──────────────────────────────────────────────────────────
+  - repo: ghl-revex-backend
+    path_prefix: "apps/courses-learners/"
+    product: "Courses — Learner APIs"
+    owner: "@revex-courses"
+
+  - repo: ghl-revex-backend
+    path_prefix: "apps/courses/"
+    product: "Courses — Authoring"
+    owner: "@revex-courses"
+
+  - repo: ghl-revex-backend
+    path_prefix: "apps/communities/"
+    product: "Communities"
+    owner: "@revex-communities"
+
+  - repo: ghl-revex-backend
+    path_prefix: "apps/clientportal-middleware/"
+    product: "Client Portal — Middleware"
+    owner: "@revex-membership"
+
+  - repo: ghl-revex-backend
+    path_prefix: "apps/gokollab/"
+    product: "Gokollab"
+    owner: "@revex-courses"
+
+  - repo: ghl-revex-backend
+    path_prefix: "apps/membership/"
+    product: "Membership"
+    owner: "@revex-membership"
+
+  - repo: ghl-revex-backend
+    path_prefix: "libs/courses-common/"
+    product: "Courses — Shared Library"
+    owner: "@revex-courses"
+
+  # ──────────────────────────────────────────────────────────
+  # Frontends (CRM / Revex)
+  # ──────────────────────────────────────────────────────────
+  - repo: ghl-crm-frontend
+    path_prefix: "apps/settings/"
+    product: "CRM — Settings"
+    owner: "@crm-settings"
+
+  - repo: ghl-crm-frontend
+    path_prefix: "apps/conversations/"
+    product: "CRM — Conversations"
+    owner: "@crm-conversations"
+
+  - repo: ghl-crm-frontend
+    path_prefix: "apps/conversations-components/"
+    product: "CRM — Conversations Components"
+    owner: "@crm-conversations"
+
+  - repo: ghl-crm-frontend
+    path_prefix: "apps/marketplace/"
+    product: "CRM — Marketplace"
+    owner: "@crm-marketplace"
+
+  - repo: ghl-revex-frontend
+    path_prefix: "apps/courses/"
+    product: "Courses — Learner Frontend"
+    owner: "@revex-courses"
+
+  - repo: ghl-revex-frontend
+    path_prefix: "apps/membership/"
+    product: "Membership — Frontend"
+    owner: "@revex-membership"
+
+  - repo: ghl-revex-membership-frontend
+    path_prefix: "apps/"
+    product: "Membership — Frontend"
+    owner: "@revex-membership"
+
+  - repo: ghl-revex-snappy
+    path_prefix: "apps/"
+    product: "Revex — Snappy"
+    owner: "@revex"
