@@ -17,7 +17,7 @@
 
 mappings:
   # ──────────────────────────────────────────────────────────
-  # platform-backend — shared core services
+  # platform-backend — shared core services (hand-curated monorepo entries)
   # ──────────────────────────────────────────────────────────
   - repo: platform-backend
     path_prefix: "apps/iam/workers/"
@@ -55,7 +55,7 @@ mappings:
     owner: "@platform"
 
   # ──────────────────────────────────────────────────────────
-  # ghl-revex-backend — revex team backends
+  # ghl-revex-backend — revex team backends (hand-curated monorepo entries)
   # ──────────────────────────────────────────────────────────
   - repo: ghl-revex-backend
     path_prefix: "apps/courses-learners/"
@@ -93,7 +93,7 @@ mappings:
     owner: "@revex-courses"
 
   # ──────────────────────────────────────────────────────────
-  # Frontends (CRM / Revex)
+  # Frontends (CRM / Revex) — hand-curated monorepo entries
   # ──────────────────────────────────────────────────────────
   - repo: ghl-crm-frontend
     path_prefix: "apps/settings/"
@@ -134,3 +134,2348 @@ mappings:
     path_prefix: "apps/"
     product: "Revex — Snappy"
     owner: "@revex"
+
+  # ──────────────────────────────────────────────────────────
+  # ──── PLATFORM ────
+  # ──────────────────────────────────────────────────────────
+  - repo: a11y-injector
+    path_prefix: ""
+    product: "Platform — Accessibility Injector"
+    owner: "@platform"
+
+  - repo: api-framework
+    path_prefix: ""
+    product: "Platform — API Framework"
+    owner: "@platform"
+
+  - repo: api-gateway
+    path_prefix: ""
+    product: "Platform — API Gateway"
+    owner: "@platform"
+
+  - repo: ARTS
+    path_prefix: ""
+    product: "Platform — ARTS"
+    owner: "@platform"
+
+  - repo: backstage
+    path_prefix: ""
+    product: "Platform — Backstage Developer Portal"
+    owner: "@platform"
+
+  - repo: bugzy-lab
+    path_prefix: ""
+    product: "Platform — Bugzy Lab"
+    owner: "@platform"
+
+  - repo: clientportal-core
+    path_prefix: ""
+    product: "Platform — Client Portal Core Library"
+    owner: "@platform"
+
+  - repo: cloud-functions
+    path_prefix: ""
+    product: "Platform — Cloud Functions"
+    owner: "@platform"
+
+  - repo: context-layer
+    path_prefix: ""
+    product: "Platform — Context Layer"
+    owner: "@platform"
+
+  - repo: Continuum
+    path_prefix: ""
+    product: "Platform — Continuum"
+    owner: "@platform"
+
+  - repo: critical-endpoints-servers
+    path_prefix: ""
+    product: "Platform — Critical Endpoints Servers"
+    owner: "@platform"
+
+  - repo: custom-widgets-price-banner
+    path_prefix: ""
+    product: "Platform — Custom Widgets Price Banner"
+    owner: "@platform"
+
+  - repo: Customer_Success_Transcription_App_V2
+    path_prefix: ""
+    product: "Platform — Customer Success Transcription App V2"
+    owner: "@platform"
+
+  - repo: Customer_Support_Transcription_App_V2
+    path_prefix: ""
+    product: "Platform — Customer Support Transcription App V2"
+    owner: "@platform"
+
+  - repo: debounce-service
+    path_prefix: ""
+    product: "Platform — Debounce Service"
+    owner: "@platform"
+
+  - repo: deployment-bot
+    path_prefix: ""
+    product: "Platform — Deployment Bot"
+    owner: "@platform"
+
+  - repo: dev-charon
+    path_prefix: ""
+    product: "Platform — Dev Charon"
+    owner: "@platform"
+
+  - repo: dev-charon-assets-viewer
+    path_prefix: ""
+    product: "Platform — Dev Charon Assets Viewer"
+    owner: "@platform"
+
+  - repo: dev-commerce-applications
+    path_prefix: ""
+    product: "Platform — Commerce Applications"
+    owner: "@platform"
+
+  - repo: dev-commerce-documentx
+    path_prefix: ""
+    product: "Platform — Commerce Document X"
+    owner: "@platform"
+
+  - repo: dev-commerce-engine
+    path_prefix: ""
+    product: "Platform — Commerce Engine"
+    owner: "@platform"
+
+  - repo: dev-commerce-frontend
+    path_prefix: ""
+    product: "Platform — Commerce Frontend"
+    owner: "@platform"
+
+  - repo: dev-commerce-ledgerx
+    path_prefix: ""
+    product: "Platform — Commerce Ledger X"
+    owner: "@platform"
+
+  - repo: dev-commerce-merchantx
+    path_prefix: ""
+    product: "Platform — Commerce Merchant X"
+    owner: "@platform"
+
+  - repo: dev-commerce-ppc
+    path_prefix: ""
+    product: "Platform — Commerce PPC"
+    owner: "@platform"
+
+  - repo: dev-commerce-proto
+    path_prefix: ""
+    product: "Platform — Commerce Proto"
+    owner: "@platform"
+
+  - repo: dev-commerce-transaction-forensics
+    path_prefix: ""
+    product: "Platform — Commerce Transaction Forensics"
+    owner: "@platform"
+
+  - repo: dev-cursor-agents-manager
+    path_prefix: ""
+    product: "Platform — Cursor Agents Manager"
+    owner: "@platform"
+
+  - repo: dev-mobcom-fsb-dashboard
+    path_prefix: ""
+    product: "Platform — Mobile Commerce FSB Dashboard"
+    owner: "@platform"
+
+  - repo: DevCapture
+    path_prefix: ""
+    product: "Platform — Dev Capture"
+    owner: "@platform"
+
+  - repo: devlab-internal
+    path_prefix: ""
+    product: "Platform — Devlab Internal"
+    owner: "@platform"
+
+  - repo: disassemble-batch
+    path_prefix: ""
+    product: "Platform — Disassemble Batch"
+    owner: "@platform"
+
+  - repo: docker-nginx-auto-ssl
+    path_prefix: ""
+    product: "Platform — Docker Nginx Auto SSL"
+    owner: "@platform"
+
+  - repo: document-chrome-extension
+    path_prefix: ""
+    product: "Platform — Document Chrome Extension"
+    owner: "@platform"
+
+  - repo: documents-contracts-rich-text-mvp
+    path_prefix: ""
+    product: "Platform — Documents Contracts Rich Text"
+    owner: "@platform"
+
+  - repo: electron-push-receiver
+    path_prefix: ""
+    product: "Platform — Electron Push Receiver"
+    owner: "@platform"
+
+  - repo: email-builder-service
+    path_prefix: ""
+    product: "Platform — Email Builder Service"
+    owner: "@platform"
+
+  - repo: engram
+    path_prefix: ""
+    product: "Platform — Engram"
+    owner: "@platform"
+
+  - repo: ent-reports
+    path_prefix: ""
+    product: "Platform — Enterprise Reports"
+    owner: "@platform"
+
+  - repo: events-backend
+    path_prefix: ""
+    product: "Platform — Events Backend"
+    owner: "@platform"
+
+  - repo: events-frontend
+    path_prefix: ""
+    product: "Platform — Events Frontend"
+    owner: "@platform"
+
+  - repo: figma-importer-plugin
+    path_prefix: ""
+    product: "Platform — Figma Importer Plugin"
+    owner: "@platform"
+
+  - repo: firestore-rules
+    path_prefix: ""
+    product: "Platform — Firestore Rules"
+    owner: "@platform"
+
+  - repo: flutter-official-packages
+    path_prefix: ""
+    product: "Platform — Flutter Official Packages"
+    owner: "@platform"
+
+  - repo: freshdesk-indexer-ts
+    path_prefix: ""
+    product: "Platform — Freshdesk Indexer"
+    owner: "@platform"
+
+  - repo: freshdesk-indexer-ts-v2
+    path_prefix: ""
+    product: "Platform — Freshdesk Indexer V2"
+    owner: "@platform"
+
+  - repo: frontend-debugger
+    path_prefix: ""
+    product: "Platform — Frontend Debugger"
+    owner: "@platform"
+
+  - repo: frontend-memory-leaks
+    path_prefix: ""
+    product: "Platform — Frontend Memory Leaks"
+    owner: "@platform"
+
+  - repo: frontend-performance-utils
+    path_prefix: ""
+    product: "Platform — Frontend Performance Utils"
+    owner: "@platform"
+
+  - repo: frontend-utils
+    path_prefix: ""
+    product: "Platform — Frontend Utils"
+    owner: "@platform"
+
+  - repo: ghl-agentic-workspace
+    path_prefix: ""
+    product: "Platform — Agentic Workspace"
+    owner: "@platform"
+
+  - repo: ghl-api-collection
+    path_prefix: ""
+    product: "Platform — API Collection"
+    owner: "@platform"
+
+  - repo: ghl-auth3
+    path_prefix: ""
+    product: "Platform — Auth V3"
+    owner: "@platform-auth"
+
+  - repo: ghl-awesome-onboarding
+    path_prefix: ""
+    product: "Platform — Awesome Onboarding"
+    owner: "@platform"
+
+  - repo: ghl-awesome-studio
+    path_prefix: ""
+    product: "Platform — Awesome Studio"
+    owner: "@platform"
+
+  - repo: ghl-brand-boards
+    path_prefix: ""
+    product: "Platform — Brand Boards"
+    owner: "@platform"
+
+  - repo: ghl-browser-mcp
+    path_prefix: ""
+    product: "Platform — Browser MCP"
+    owner: "@platform"
+
+  - repo: ghl-bulk-request
+    path_prefix: ""
+    product: "Platform — Bulk Request"
+    owner: "@platform"
+
+  - repo: ghl-codebase-mcp
+    path_prefix: ""
+    product: "Platform — Codebase MCP"
+    owner: "@platform"
+
+  - repo: ghl-context-builder
+    path_prefix: ""
+    product: "Platform — Context Builder"
+    owner: "@platform"
+
+  - repo: ghl-ctk-date-time-picker
+    path_prefix: ""
+    product: "Platform — CTK Date Time Picker"
+    owner: "@platform"
+
+  - repo: ghl-cursor-skills-mcp
+    path_prefix: ""
+    product: "Platform — Cursor Skills MCP"
+    owner: "@platform"
+
+  - repo: GHL-Design-Memory
+    path_prefix: ""
+    product: "Platform — Design Memory"
+    owner: "@platform"
+
+  - repo: ghl-desktop-app
+    path_prefix: ""
+    product: "Platform — Desktop App"
+    owner: "@platform"
+
+  - repo: ghl-electron-desktop-apps-test
+    path_prefix: ""
+    product: "Platform — Electron Desktop Apps"
+    owner: "@platform"
+
+  - repo: ghl-external-tracking
+    path_prefix: ""
+    product: "Platform — External Tracking"
+    owner: "@platform"
+
+  - repo: ghl-federation-dashboard
+    path_prefix: ""
+    product: "Platform — Federation Dashboard"
+    owner: "@platform"
+
+  - repo: ghl-github-pr-dashboard
+    path_prefix: ""
+    product: "Platform — GitHub PR Dashboard"
+    owner: "@platform"
+
+  - repo: ghl-helm-charts
+    path_prefix: ""
+    product: "Platform — Helm Charts"
+    owner: "@platform"
+
+  - repo: ghl-i18n-feedback
+    path_prefix: ""
+    product: "Platform — I18N Feedback"
+    owner: "@platform"
+
+  - repo: ghl-image-py
+    path_prefix: ""
+    product: "Platform — Image Processing Python"
+    owner: "@platform"
+
+  - repo: ghl-isv-app
+    path_prefix: ""
+    product: "Platform — ISV App"
+    owner: "@platform"
+
+  - repo: ghl-leadgen-countdowntimer
+    path_prefix: ""
+    product: "Platform — Leadgen Countdown Timer"
+    owner: "@platform"
+
+  - repo: ghl-leadgen-frontend
+    path_prefix: ""
+    product: "Platform — Leadgen Frontend"
+    owner: "@platform"
+
+  - repo: ghl-localisation-v2
+    path_prefix: ""
+    product: "Platform — Localisation V2"
+    owner: "@platform"
+
+  - repo: ghl-localization
+    path_prefix: ""
+    product: "Platform — Localization"
+    owner: "@platform"
+
+  - repo: ghl-manifest-viewer
+    path_prefix: ""
+    product: "Platform — Manifest Viewer"
+    owner: "@platform"
+
+  - repo: ghl-mcp-server
+    path_prefix: ""
+    product: "Platform — MCP Server"
+    owner: "@platform"
+
+  - repo: ghl-media-center
+    path_prefix: ""
+    product: "Platform — Media Center"
+    owner: "@platform"
+
+  - repo: ghl-mobile-app-customiser
+    path_prefix: ""
+    product: "Platform — Mobile App Customiser"
+    owner: "@platform"
+
+  - repo: ghl-module-federation-plugin
+    path_prefix: ""
+    product: "Platform — Module Federation Plugin"
+    owner: "@platform"
+
+  - repo: ghl-monorepo-boilerplate
+    path_prefix: ""
+    product: "Platform — Monorepo Boilerplate"
+    owner: "@platform"
+
+  - repo: ghl-moz-header
+    path_prefix: ""
+    product: "Platform — Mozilla Header"
+    owner: "@platform"
+
+  - repo: ghl-ofa
+    path_prefix: ""
+    product: "Platform — OFA"
+    owner: "@platform"
+
+  - repo: ghl-operations
+    path_prefix: ""
+    product: "Platform — Operations"
+    owner: "@platform"
+
+  - repo: ghl-pdf-compliance
+    path_prefix: ""
+    product: "Platform — PDF Compliance"
+    owner: "@platform"
+
+  - repo: ghl-plugins
+    path_prefix: ""
+    product: "Platform — Plugins"
+    owner: "@platform"
+
+  - repo: ghl-poc
+    path_prefix: ""
+    product: "Platform — POC"
+    owner: "@platform"
+
+  - repo: ghl-pr-tracker
+    path_prefix: ""
+    product: "Platform — PR Tracker"
+    owner: "@platform"
+
+  - repo: ghl-proposals
+    path_prefix: ""
+    product: "Platform — Proposals"
+    owner: "@platform"
+
+  - repo: ghl-public-apis
+    path_prefix: ""
+    product: "Platform — Public APIs"
+    owner: "@platform"
+
+  - repo: ghl-public-library-ssr
+    path_prefix: ""
+    product: "Platform — Public Library SSR"
+    owner: "@platform"
+
+  - repo: ghl-qr-code
+    path_prefix: ""
+    product: "Platform — QR Code"
+    owner: "@platform"
+
+  - repo: ghl-qr-server
+    path_prefix: ""
+    product: "Platform — QR Server"
+    owner: "@platform"
+
+  - repo: ghl-repoatlas
+    path_prefix: ""
+    product: "Platform — Repo Atlas"
+    owner: "@platform"
+
+  - repo: ghl-route-registry
+    path_prefix: ""
+    product: "Platform — Route Registry"
+    owner: "@platform"
+
+  - repo: ghl-sdk-examples
+    path_prefix: ""
+    product: "Platform — SDK Examples"
+    owner: "@platform"
+
+  - repo: ghl-sdk-generator
+    path_prefix: ""
+    product: "Platform — SDK Generator"
+    owner: "@platform"
+
+  - repo: ghl-seo-app
+    path_prefix: ""
+    product: "Platform — SEO App"
+    owner: "@platform"
+
+  - repo: ghl-ssr-boilerplate
+    path_prefix: ""
+    product: "Platform — SSR Boilerplate"
+    owner: "@platform"
+
+  - repo: ghl-template-library
+    path_prefix: ""
+    product: "Platform — Template Library"
+    owner: "@platform"
+
+  - repo: ghl-text-editor
+    path_prefix: ""
+    product: "Platform — Text Editor"
+    owner: "@platform"
+
+  - repo: ghl-ui
+    path_prefix: ""
+    product: "Platform — UI"
+    owner: "@platform"
+
+  - repo: ghl-v2-api-docs
+    path_prefix: ""
+    product: "Platform — V2 API Docs"
+    owner: "@platform"
+
+  - repo: ghl-widgets
+    path_prefix: ""
+    product: "Platform — Widgets"
+    owner: "@platform"
+
+  - repo: ghl_evalcore
+    path_prefix: ""
+    product: "Platform — Eval Core"
+    owner: "@platform"
+
+  - repo: ghls-pr
+    path_prefix: ""
+    product: "Platform — GHLS PR"
+    owner: "@platform"
+
+  - repo: git-jenkins-mcp
+    path_prefix: ""
+    product: "Platform — Git Jenkins MCP"
+    owner: "@platform"
+
+  - repo: github-digest
+    path_prefix: ""
+    product: "Platform — GitHub Digest"
+    owner: "@platform"
+
+  - repo: go-platform
+    path_prefix: ""
+    product: "Platform — Go Platform"
+    owner: "@platform"
+
+  - repo: go-platform-core
+    path_prefix: ""
+    product: "Platform — Go Platform Core"
+    owner: "@platform"
+
+  - repo: grafana-report-generator
+    path_prefix: ""
+    product: "Platform — Grafana Report Generator"
+    owner: "@platform"
+
+  - repo: gsd-ghl
+    path_prefix: ""
+    product: "Platform — GSD"
+    owner: "@platform"
+
+  - repo: highrise-figmagic
+    path_prefix: ""
+    product: "Platform — Highrise Figmagic"
+    owner: "@platform"
+
+  - repo: highrise-next
+    path_prefix: ""
+    product: "Platform — Highrise Next"
+    owner: "@platform"
+
+  - repo: highrise-nuxt-v3-v4
+    path_prefix: ""
+    product: "Platform — Highrise Nuxt V3/V4"
+    owner: "@platform"
+
+  - repo: HighRise-Tokens
+    path_prefix: ""
+    product: "Platform — Highrise Design Tokens"
+    owner: "@platform"
+
+  - repo: highlevel-api-docs
+    path_prefix: ""
+    product: "Platform — API Docs"
+    owner: "@platform"
+
+  - repo: highlevel-api-php
+    path_prefix: ""
+    product: "Platform — API PHP SDK"
+    owner: "@platform"
+
+  - repo: highlevel-api-python
+    path_prefix: ""
+    product: "Platform — API Python SDK"
+    owner: "@platform"
+
+  - repo: highlevel-api-sdk
+    path_prefix: ""
+    product: "Platform — API SDK"
+    owner: "@platform"
+
+  - repo: highlevel-api-sdk-private
+    path_prefix: ""
+    product: "Platform — API SDK Private"
+    owner: "@platform"
+
+  - repo: highlevel-functions
+    path_prefix: ""
+    product: "Platform — Functions"
+    owner: "@platform"
+
+  - repo: highlevel-functions-temp
+    path_prefix: ""
+    product: "Platform — Functions Temp"
+    owner: "@platform"
+
+  - repo: highlevel-functions-utils
+    path_prefix: ""
+    product: "Platform — Functions Utils"
+    owner: "@platform"
+
+  - repo: highlevel-functions-v2
+    path_prefix: ""
+    product: "Platform — Functions V2"
+    owner: "@platform"
+
+  - repo: highlevel-functions-v3
+    path_prefix: ""
+    product: "Platform — Functions V3"
+    owner: "@platform"
+
+  - repo: highlevel-infrastructure
+    path_prefix: ""
+    product: "Platform — Infrastructure"
+    owner: "@platform"
+
+  - repo: highlevel-jenkins-shared-libs
+    path_prefix: ""
+    product: "Platform — Jenkins Shared Libraries"
+    owner: "@platform"
+
+  - repo: highlevel-scraper
+    path_prefix: ""
+    product: "Platform — Scraper"
+    owner: "@platform"
+
+  - repo: hl-base-utils
+    path_prefix: ""
+    product: "Platform — Base Utils"
+    owner: "@platform"
+
+  - repo: hl-utils
+    path_prefix: ""
+    product: "Platform — HL Utils"
+    owner: "@platform"
+
+  - repo: hubspot-importer
+    path_prefix: ""
+    product: "Platform — Hubspot Importer"
+    owner: "@platform"
+
+  - repo: hubspot-importer-poc
+    path_prefix: ""
+    product: "Platform — Hubspot Importer POC"
+    owner: "@platform"
+
+  - repo: I18_Translations_Detection_Plugin
+    path_prefix: ""
+    product: "Platform — I18N Translations Detection Plugin"
+    owner: "@platform"
+
+  - repo: i18n-analysis
+    path_prefix: ""
+    product: "Platform — I18N Analysis"
+    owner: "@platform"
+
+  - repo: i18n-as-a-service
+    path_prefix: ""
+    product: "Platform — I18N as a Service"
+    owner: "@platform"
+
+  - repo: i18n-validator
+    path_prefix: ""
+    product: "Platform — I18N Validator"
+    owner: "@platform"
+
+  - repo: ideas-board-vis-frontend
+    path_prefix: ""
+    product: "Platform — Ideas Board Visualizer"
+    owner: "@platform"
+
+  - repo: image-processing-service
+    path_prefix: ""
+    product: "Platform — Image Processing Service"
+    owner: "@platform"
+
+  - repo: infrastructure-as-a-code
+    path_prefix: ""
+    product: "Platform — Infrastructure as Code"
+    owner: "@platform"
+
+  - repo: instagram-webhook-native-posts
+    path_prefix: ""
+    product: "Platform — Instagram Webhook Native Posts"
+    owner: "@platform"
+
+  - repo: internal-api-documentation
+    path_prefix: ""
+    product: "Platform — Internal API Documentation"
+    owner: "@platform"
+
+  - repo: isv-monitoring-service
+    path_prefix: ""
+    product: "Platform — ISV Monitoring Service"
+    owner: "@platform"
+
+  - repo: Jobber-App-React
+    path_prefix: ""
+    product: "Platform — Jobber App"
+    owner: "@platform"
+
+  - repo: langflow
+    path_prefix: ""
+    product: "Platform — Langflow"
+    owner: "@platform"
+
+  - repo: langfuse
+    path_prefix: ""
+    product: "Platform — Langfuse"
+    owner: "@platform"
+
+  - repo: lead-tracker
+    path_prefix: ""
+    product: "Platform — Lead Tracker"
+    owner: "@platform"
+
+  - repo: leadgen-ad-publishing-frontend
+    path_prefix: ""
+    product: "Platform — Ad Publishing Frontend"
+    owner: "@platform"
+
+  - repo: leadgen-admin
+    path_prefix: ""
+    product: "Platform — Leadgen Admin"
+    owner: "@platform"
+
+  - repo: leadgen-backend
+    path_prefix: ""
+    product: "Platform — Leadgen Backend"
+    owner: "@platform"
+
+  - repo: leadgen-backend-python
+    path_prefix: ""
+    product: "Platform — Leadgen Backend Python"
+    owner: "@platform"
+
+  - repo: leadgen-cache-server
+    path_prefix: ""
+    product: "Platform — Leadgen Cache Server"
+    owner: "@platform"
+
+  - repo: leadgen-customer-access-center
+    path_prefix: ""
+    product: "Platform — Customer Access Center"
+    owner: "@platform"
+
+  - repo: leadgen-ipinfo
+    path_prefix: ""
+    product: "Platform — IP Info"
+    owner: "@platform"
+
+  - repo: leadgen-kaizen-backend
+    path_prefix: ""
+    product: "Platform — Kaizen Backend"
+    owner: "@platform"
+
+  - repo: leadgen-loyalty-frontend
+    path_prefix: ""
+    product: "Platform — Loyalty Frontend"
+    owner: "@platform"
+
+  - repo: leadgen-store-frontend
+    path_prefix: ""
+    product: "Platform — Store Frontend"
+    owner: "@platform"
+
+  - repo: lighthouse-worker
+    path_prefix: ""
+    product: "Platform — Lighthouse Worker"
+    owner: "@platform"
+
+  - repo: localization-lib
+    path_prefix: ""
+    product: "Platform — Localization Library"
+    owner: "@platform"
+
+  - repo: location-prospect
+    path_prefix: ""
+    product: "Platform — Location Prospect"
+    owner: "@platform"
+
+  - repo: logger-rust
+    path_prefix: ""
+    product: "Platform — Logger Rust"
+    owner: "@platform"
+
+  - repo: mcpserver-rules
+    path_prefix: ""
+    product: "Platform — MCP Server Rules"
+    owner: "@platform"
+
+  - repo: mimt-proxy
+    path_prefix: ""
+    product: "Platform — MIMT Proxy"
+    owner: "@platform"
+
+  - repo: mobile-backend
+    path_prefix: ""
+    product: "Platform — Mobile Backend"
+    owner: "@platform"
+
+  - repo: mobile-pipeline-auditor
+    path_prefix: ""
+    product: "Platform — Mobile Pipeline Auditor"
+    owner: "@platform"
+
+  - repo: MoltClaw-by-HighLevel
+    path_prefix: ""
+    product: "Platform — MoltClaw"
+    owner: "@platform"
+
+  - repo: naive-ui
+    path_prefix: ""
+    product: "Platform — Naive UI"
+    owner: "@platform"
+
+  - repo: nginx-vod-module
+    path_prefix: ""
+    product: "Platform — Nginx VOD Module"
+    owner: "@platform"
+
+  - repo: nodejs-logging
+    path_prefix: ""
+    product: "Platform — Node.js Logging"
+    owner: "@platform"
+
+  - repo: nodejs-logging-bunyan
+    path_prefix: ""
+    product: "Platform — Node.js Logging Bunyan"
+    owner: "@platform"
+
+  - repo: nuxt-highrise-module
+    path_prefix: ""
+    product: "Platform — Nuxt Highrise Module"
+    owner: "@platform"
+
+  - repo: nuxt-highrise-ssr
+    path_prefix: ""
+    product: "Platform — Nuxt Highrise SSR"
+    owner: "@platform"
+
+  - repo: objective-builder-ui
+    path_prefix: ""
+    product: "Platform — Objective Builder UI"
+    owner: "@platform"
+
+  - repo: outscrapper-ghl
+    path_prefix: ""
+    product: "Platform — Outscrapper"
+    owner: "@platform"
+
+  - repo: pdf-core-engine
+    path_prefix: ""
+    product: "Platform — PDF Core Engine"
+    owner: "@platform"
+
+  - repo: platform-backend-demo
+    path_prefix: ""
+    product: "Platform — Backend Demo"
+    owner: "@platform"
+
+  - repo: platform-common-argo-apps
+    path_prefix: ""
+    product: "Platform — Common Argo Apps"
+    owner: "@platform"
+
+  - repo: platform-common-helm-charts
+    path_prefix: ""
+    product: "Platform — Common Helm Charts"
+    owner: "@platform"
+
+  - repo: platform-core
+    path_prefix: ""
+    product: "Platform — Core Library"
+    owner: "@platform"
+
+  - repo: platform-devtools-backend
+    path_prefix: ""
+    product: "Platform — Devtools Backend"
+    owner: "@platform"
+
+  - repo: platform-devtools-frontend
+    path_prefix: ""
+    product: "Platform — Devtools Frontend"
+    owner: "@platform"
+
+  - repo: platform-experiments
+    path_prefix: ""
+    product: "Platform — Experiments"
+    owner: "@platform"
+
+  - repo: platform-frontend-backend
+    path_prefix: ""
+    product: "Platform — Frontend Backend"
+    owner: "@platform"
+
+  - repo: platform-frontend-docs
+    path_prefix: ""
+    product: "Platform — Frontend Docs"
+    owner: "@platform"
+
+  - repo: platform-frontend-playground
+    path_prefix: ""
+    product: "Platform — Frontend Playground"
+    owner: "@platform"
+
+  - repo: platform-infra-argo-apps
+    path_prefix: ""
+    product: "Platform — Infra Argo Apps"
+    owner: "@platform"
+
+  - repo: platform-infra-helm-charts
+    path_prefix: ""
+    product: "Platform — Infra Helm Charts"
+    owner: "@platform"
+
+  - repo: platform-jenkins-shared-library
+    path_prefix: ""
+    product: "Platform — Jenkins Shared Library"
+    owner: "@platform"
+
+  - repo: platform-pocs
+    path_prefix: ""
+    product: "Platform — POCs"
+    owner: "@platform"
+
+  - repo: platform-sample-java-app
+    path_prefix: ""
+    product: "Platform — Sample Java App"
+    owner: "@platform"
+
+  - repo: platform-sample-nodejs-app
+    path_prefix: ""
+    product: "Platform — Sample Node.js App"
+    owner: "@platform"
+
+  - repo: platform-shared-changes
+    path_prefix: ""
+    product: "Platform — Shared Changes"
+    owner: "@platform"
+
+  - repo: platform-terraform-gcp-infra
+    path_prefix: ""
+    product: "Platform — Terraform GCP Infra"
+    owner: "@platform"
+
+  - repo: platform-terraform-gcp-modules
+    path_prefix: ""
+    product: "Platform — Terraform GCP Modules"
+    owner: "@platform"
+
+  - repo: platform-ui
+    path_prefix: ""
+    product: "Platform — UI"
+    owner: "@platform"
+
+  - repo: preference-management-frontend
+    path_prefix: ""
+    product: "Platform — Preference Management Frontend"
+    owner: "@platform"
+
+  - repo: product-central
+    path_prefix: ""
+    product: "Platform — Product Central"
+    owner: "@platform"
+
+  - repo: pulse
+    path_prefix: ""
+    product: "Platform — Pulse"
+    owner: "@platform"
+
+  - repo: quality-gates
+    path_prefix: ""
+    product: "Platform — Quality Gates"
+    owner: "@platform"
+
+  - repo: quickchart
+    path_prefix: ""
+    product: "Platform — Quickchart"
+    owner: "@platform"
+
+  - repo: rca-analysis
+    path_prefix: ""
+    product: "Platform — RCA Analysis"
+    owner: "@platform"
+
+  - repo: rdialr
+    path_prefix: ""
+    product: "Platform — Rdialr"
+    owner: "@platform"
+
+  - repo: redis-backup-cloud-function-gcp
+    path_prefix: ""
+    product: "Platform — Redis Backup Cloud Function"
+    owner: "@platform"
+
+  - repo: revops-transcription-app
+    path_prefix: ""
+    product: "Platform — RevOps Transcription App"
+    owner: "@platform"
+
+  - repo: revops-transcription-app-ooh
+    path_prefix: ""
+    product: "Platform — RevOps Transcription App OOH"
+    owner: "@platform"
+
+  - repo: screenshot-service
+    path_prefix: ""
+    product: "Platform — Screenshot Service"
+    owner: "@platform"
+
+  - repo: sdet-platform
+    path_prefix: ""
+    product: "Platform — SDET Platform"
+    owner: "@platform"
+
+  - repo: sdet-platform-backend
+    path_prefix: ""
+    product: "Platform — SDET Platform Backend"
+    owner: "@platform"
+
+  - repo: sdet-platform-frontend
+    path_prefix: ""
+    product: "Platform — SDET Platform Frontend"
+    owner: "@platform"
+
+  - repo: seed-module
+    path_prefix: ""
+    product: "Platform — Seed Module"
+    owner: "@platform"
+
+  - repo: single-endpoint-get-by-id-servers
+    path_prefix: ""
+    product: "Platform — Single Endpoint Get-by-ID Servers"
+    owner: "@platform"
+
+  - repo: single-endpoint-servers
+    path_prefix: ""
+    product: "Platform — Single Endpoint Servers"
+    owner: "@platform"
+
+  - repo: Squire
+    path_prefix: ""
+    product: "Platform — Squire"
+    owner: "@platform"
+
+  - repo: ssl-clerk
+    path_prefix: ""
+    product: "Platform — SSL Clerk"
+    owner: "@platform"
+
+  - repo: traffic-cop
+    path_prefix: ""
+    product: "Platform — Traffic Cop"
+    owner: "@platform"
+
+  - repo: update-recent-message-service
+    path_prefix: ""
+    product: "Platform — Update Recent Message Service"
+    owner: "@platform"
+
+  - repo: utils
+    path_prefix: ""
+    product: "Platform — Utils"
+    owner: "@platform"
+
+  - repo: vibe-builder
+    path_prefix: ""
+    product: "Platform — Vibe Builder"
+    owner: "@platform"
+
+  - repo: vibe-creator
+    path_prefix: ""
+    product: "Platform — Vibe Creator"
+    owner: "@platform"
+
+  - repo: vibe-platform
+    path_prefix: ""
+    product: "Platform — Vibe Platform"
+    owner: "@platform"
+
+  - repo: video-transcoding-service
+    path_prefix: ""
+    product: "Platform — Video Transcoding Service"
+    owner: "@platform"
+
+  - repo: wordpress-core
+    path_prefix: ""
+    product: "Platform — Wordpress Core"
+    owner: "@platform"
+
+  - repo: wordpress-uptime-monitor
+    path_prefix: ""
+    product: "Platform — Wordpress Uptime Monitor"
+    owner: "@platform"
+
+  - repo: Wordpress-V2-Support
+    path_prefix: ""
+    product: "Platform — Wordpress V2 Support"
+    owner: "@platform"
+
+  - repo: wordpress-widget
+    path_prefix: ""
+    product: "Platform — Wordpress Widget"
+    owner: "@platform"
+
+  - repo: yarn-v4-nest-poc
+    path_prefix: ""
+    product: "Platform — Yarn V4 Nest POC"
+    owner: "@platform"
+
+  - repo: zoom-scribe
+    path_prefix: ""
+    product: "Platform — Zoom Scribe"
+    owner: "@platform"
+
+  # ──────────────────────────────────────────────────────────
+  # ──── REVEX ────
+  # ──────────────────────────────────────────────────────────
+  - repo: assets-drm-client
+    path_prefix: ""
+    product: "Revex — Assets DRM Client"
+    owner: "@revex"
+
+  - repo: automation-am-client-portal
+    path_prefix: ""
+    product: "Membership — Client Portal Automation"
+    owner: "@revex-membership"
+
+  - repo: ghl-membership-frontend
+    path_prefix: ""
+    product: "Membership — Frontend"
+    owner: "@revex-membership"
+
+  - repo: ghl-revex-clientportal-apps
+    path_prefix: ""
+    product: "Membership — Client Portal Apps"
+    owner: "@revex-membership"
+
+  - repo: ghl-revex-interviews
+    path_prefix: ""
+    product: "Revex — Interviews"
+    owner: "@revex"
+
+  - repo: membership-backend
+    path_prefix: ""
+    product: "Membership — Backend"
+    owner: "@revex-membership"
+
+  - repo: membership-flutter-app
+    path_prefix: ""
+    product: "Membership — Flutter App"
+    owner: "@revex-membership"
+
+  - repo: membership-hmi-app
+    path_prefix: ""
+    product: "Membership — HMI App"
+    owner: "@revex-membership"
+
+  - repo: membership-hmi-preview
+    path_prefix: ""
+    product: "Membership — HMI Preview"
+    owner: "@revex-membership"
+
+  - repo: membership-ui-core
+    path_prefix: ""
+    product: "Membership — UI Core"
+    owner: "@revex-membership"
+
+  - repo: revex-pyrw-dev-helper-chrome-ext
+    path_prefix: ""
+    product: "Revex — Dev Helper Chrome Extension"
+    owner: "@revex"
+
+  - repo: revex-wordpress-lc-easy-migrator
+    path_prefix: ""
+    product: "Revex — Wordpress LC Easy Migrator"
+    owner: "@revex"
+
+  - repo: revex-wordpress-lc-easy-migrator-front-end
+    path_prefix: ""
+    product: "Revex — Wordpress LC Easy Migrator Frontend"
+    owner: "@revex"
+
+  - repo: revex-wordpress-leadconnector-plugin
+    path_prefix: ""
+    product: "Revex — Wordpress LeadConnector Plugin"
+    owner: "@revex"
+
+  - repo: revex-wordpress-leadconnector-plugin-frontend
+    path_prefix: ""
+    product: "Revex — Wordpress LeadConnector Plugin Frontend"
+    owner: "@revex"
+
+  - repo: revex-wordpress-threatlens
+    path_prefix: ""
+    product: "Revex — Wordpress Threatlens"
+    owner: "@revex"
+
+  # ghl-revex-backend — monorepo with sub-path entries (additional apps not in bootstrap set)
+  - repo: ghl-revex-backend
+    path_prefix: "apps/affiliate-portal/"
+    product: "Revex — Affiliate Portal Backend"
+    owner: "@revex"
+
+  - repo: ghl-revex-backend
+    path_prefix: "apps/agency-dashboard/"
+    product: "Revex — Agency Dashboard Backend"
+    owner: "@revex"
+
+  - repo: ghl-revex-backend
+    path_prefix: "apps/assets-drm/"
+    product: "Revex — Assets DRM Backend"
+    owner: "@revex"
+
+  - repo: ghl-revex-backend
+    path_prefix: "apps/billing/"
+    product: "Revex — Billing Backend"
+    owner: "@revex"
+
+  - repo: ghl-revex-backend
+    path_prefix: "apps/blade-platform/"
+    product: "Revex — Blade Platform Backend"
+    owner: "@revex"
+
+  - repo: ghl-revex-backend
+    path_prefix: "apps/certificates/"
+    product: "Courses — Certificates Backend"
+    owner: "@revex-courses"
+
+  - repo: ghl-revex-backend
+    path_prefix: "apps/client-portal/"
+    product: "Membership — Client Portal Backend"
+    owner: "@revex-membership"
+
+  - repo: ghl-revex-backend
+    path_prefix: "apps/clientportal-analytics/"
+    product: "Membership — Client Portal Analytics"
+    owner: "@revex-membership"
+
+  - repo: ghl-revex-backend
+    path_prefix: "apps/clientportal-preview-cache/"
+    product: "Membership — Client Portal Preview Cache"
+    owner: "@revex-membership"
+
+  - repo: ghl-revex-backend
+    path_prefix: "apps/communities/"
+    product: "Communities — Backend"
+    owner: "@revex-communities"
+
+  - repo: ghl-revex-backend
+    path_prefix: "apps/courses-analytics/"
+    product: "Courses — Analytics"
+    owner: "@revex-courses"
+
+  - repo: ghl-revex-backend
+    path_prefix: "apps/desktop-app/"
+    product: "Revex — Desktop App Backend"
+    owner: "@revex"
+
+  - repo: ghl-revex-backend
+    path_prefix: "apps/feature-permissions/"
+    product: "Revex — Feature Permissions"
+    owner: "@revex"
+
+  - repo: ghl-revex-backend
+    path_prefix: "apps/gokollab-feed/"
+    product: "Gokollab — Feed"
+    owner: "@revex-courses"
+
+  - repo: ghl-revex-backend
+    path_prefix: "apps/labs/"
+    product: "Revex — Labs"
+    owner: "@revex"
+
+  - repo: ghl-revex-backend
+    path_prefix: "apps/lc-cpaas-compliance/"
+    product: "Revex — LC CPAAS Compliance"
+    owner: "@revex"
+
+  - repo: ghl-revex-backend
+    path_prefix: "apps/lc-cpaas-messages/"
+    product: "Revex — LC CPAAS Messages"
+    owner: "@revex"
+
+  - repo: ghl-revex-backend
+    path_prefix: "apps/lc-cpaas-numbers/"
+    product: "Revex — LC CPAAS Numbers"
+    owner: "@revex"
+
+  - repo: ghl-revex-backend
+    path_prefix: "apps/lc-cpaas-pam/"
+    product: "Revex — LC CPAAS PAM"
+    owner: "@revex"
+
+  - repo: ghl-revex-backend
+    path_prefix: "apps/lc-cpaas-voice/"
+    product: "Revex — LC CPAAS Voice"
+    owner: "@revex"
+
+  - repo: ghl-revex-backend
+    path_prefix: "apps/lc-phone/"
+    product: "Revex — LC Phone"
+    owner: "@revex"
+
+  - repo: ghl-revex-backend
+    path_prefix: "apps/localisation-v2/"
+    product: "Revex — Localisation V2"
+    owner: "@revex"
+
+  - repo: ghl-revex-backend
+    path_prefix: "apps/mobile-app-customiser/"
+    product: "Revex — Mobile App Customiser"
+    owner: "@revex"
+
+  - repo: ghl-revex-backend
+    path_prefix: "apps/pendo/"
+    product: "Revex — Pendo"
+    owner: "@revex"
+
+  - repo: ghl-revex-backend
+    path_prefix: "apps/prospecting/"
+    product: "Revex — Prospecting"
+    owner: "@revex"
+
+  - repo: ghl-revex-backend
+    path_prefix: "apps/reputation/"
+    product: "Revex — Reputation"
+    owner: "@revex"
+
+  - repo: ghl-revex-backend
+    path_prefix: "apps/reselling/"
+    product: "Revex — Reselling"
+    owner: "@revex"
+
+  - repo: ghl-revex-backend
+    path_prefix: "apps/saas/"
+    product: "SaaS — Revex Backend"
+    owner: "@saas"
+
+  - repo: ghl-revex-backend
+    path_prefix: "apps/snapshots/"
+    product: "Platform — Snapshots Revex"
+    owner: "@platform-snapshots"
+
+  - repo: ghl-revex-backend
+    path_prefix: "apps/stripe-consumer/"
+    product: "Payments — Stripe Consumer"
+    owner: "@payments"
+
+  - repo: ghl-revex-backend
+    path_prefix: "apps/support-portal/"
+    product: "Revex — Support Portal"
+    owner: "@revex"
+
+  - repo: ghl-revex-backend
+    path_prefix: "apps/visibility-ai/"
+    product: "AI — Visibility"
+    owner: "@ai"
+
+  - repo: ghl-revex-backend
+    path_prefix: "apps/wallet-subscriptions/"
+    product: "Payments — Wallet Subscriptions"
+    owner: "@payments"
+
+  - repo: ghl-revex-backend
+    path_prefix: "apps/wordpress/"
+    product: "Revex — Wordpress"
+    owner: "@revex"
+
+  - repo: ghl-revex-backend
+    path_prefix: "apps/yext/"
+    product: "Revex — Yext"
+    owner: "@revex"
+
+  # ghl-revex-frontend — monorepo additional apps
+  - repo: ghl-revex-frontend
+    path_prefix: "apps/affiliate-portal/"
+    product: "Revex — Affiliate Portal Frontend"
+    owner: "@revex"
+
+  - repo: ghl-revex-frontend
+    path_prefix: "apps/agency-dashboard/"
+    product: "Revex — Agency Dashboard Frontend"
+    owner: "@revex"
+
+  - repo: ghl-revex-frontend
+    path_prefix: "apps/agency-internaltools/"
+    product: "Revex — Agency Internal Tools"
+    owner: "@revex"
+
+  - repo: ghl-revex-frontend
+    path_prefix: "apps/assets-drm-preview/"
+    product: "Revex — Assets DRM Preview"
+    owner: "@revex"
+
+  - repo: ghl-revex-frontend
+    path_prefix: "apps/blade-platform/"
+    product: "Revex — Blade Platform Frontend"
+    owner: "@revex"
+
+  - repo: ghl-revex-frontend
+    path_prefix: "apps/certificates-builder/"
+    product: "Courses — Certificates Builder"
+    owner: "@revex-courses"
+
+  - repo: ghl-revex-frontend
+    path_prefix: "apps/clientportal-builder/"
+    product: "Membership — Client Portal Builder"
+    owner: "@revex-membership"
+
+  - repo: ghl-revex-frontend
+    path_prefix: "apps/clientportal-preview/"
+    product: "Membership — Client Portal Preview"
+    owner: "@revex-membership"
+
+  - repo: ghl-revex-frontend
+    path_prefix: "apps/clientportal-sso/"
+    product: "Membership — Client Portal SSO"
+    owner: "@revex-membership"
+
+  - repo: ghl-revex-frontend
+    path_prefix: "apps/communities-builder/"
+    product: "Communities — Builder Frontend"
+    owner: "@revex-communities"
+
+  - repo: ghl-revex-frontend
+    path_prefix: "apps/communities-preview/"
+    product: "Communities — Preview Frontend"
+    owner: "@revex-communities"
+
+  - repo: ghl-revex-frontend
+    path_prefix: "apps/company/"
+    product: "Revex — Company Frontend"
+    owner: "@revex"
+
+  - repo: ghl-revex-frontend
+    path_prefix: "apps/desktop-customizer/"
+    product: "Revex — Desktop Customizer"
+    owner: "@revex"
+
+  - repo: ghl-revex-frontend
+    path_prefix: "apps/email-isv/"
+    product: "Conversations — Email ISV Frontend"
+    owner: "@conversations"
+
+  - repo: ghl-revex-frontend
+    path_prefix: "apps/gokollab-builder/"
+    product: "Gokollab — Builder Frontend"
+    owner: "@revex-courses"
+
+  - repo: ghl-revex-frontend
+    path_prefix: "apps/gokollab-preview/"
+    product: "Gokollab — Preview Frontend"
+    owner: "@revex-courses"
+
+  - repo: ghl-revex-frontend
+    path_prefix: "apps/kollab-support/"
+    product: "Gokollab — Support Frontend"
+    owner: "@revex-courses"
+
+  - repo: ghl-revex-frontend
+    path_prefix: "apps/lc-email-ui/"
+    product: "Conversations — LC Email UI"
+    owner: "@conversations"
+
+  - repo: ghl-revex-frontend
+    path_prefix: "apps/location-billing/"
+    product: "Revex — Location Billing"
+    owner: "@revex"
+
+  - repo: ghl-revex-frontend
+    path_prefix: "apps/locations/"
+    product: "Revex — Locations Frontend"
+    owner: "@revex"
+
+  - repo: ghl-revex-frontend
+    path_prefix: "apps/membership-settings/"
+    product: "Membership — Settings"
+    owner: "@revex-membership"
+
+  - repo: ghl-revex-frontend
+    path_prefix: "apps/memberships/"
+    product: "Membership — Memberships Frontend"
+    owner: "@revex-membership"
+
+  - repo: ghl-revex-frontend
+    path_prefix: "apps/phone-integration/"
+    product: "Phone — Integration Frontend"
+    owner: "@phone"
+
+  - repo: ghl-revex-frontend
+    path_prefix: "apps/platform-billing/"
+    product: "Platform — Billing Frontend"
+    owner: "@platform"
+
+  - repo: ghl-revex-frontend
+    path_prefix: "apps/power-dialer/"
+    product: "Phone — Power Dialer Frontend"
+    owner: "@phone"
+
+  - repo: ghl-revex-frontend
+    path_prefix: "apps/reputation/"
+    product: "Revex — Reputation Frontend"
+    owner: "@revex"
+
+  - repo: ghl-revex-frontend
+    path_prefix: "apps/reputation-builder/"
+    product: "Revex — Reputation Builder"
+    owner: "@revex"
+
+  - repo: ghl-revex-frontend
+    path_prefix: "apps/reputation-widgets/"
+    product: "Revex — Reputation Widgets"
+    owner: "@revex"
+
+  - repo: ghl-revex-frontend
+    path_prefix: "apps/reselling/"
+    product: "Revex — Reselling Frontend"
+    owner: "@revex"
+
+  - repo: ghl-revex-frontend
+    path_prefix: "apps/saas/"
+    product: "SaaS — Revex Frontend"
+    owner: "@saas"
+
+  - repo: ghl-revex-frontend
+    path_prefix: "apps/snapshots/"
+    product: "Platform — Snapshots Frontend"
+    owner: "@platform-snapshots"
+
+  - repo: ghl-revex-frontend
+    path_prefix: "apps/visibility-ai/"
+    product: "AI — Visibility Frontend"
+    owner: "@ai"
+
+  - repo: ghl-revex-frontend
+    path_prefix: "apps/wordpress/"
+    product: "Revex — Wordpress Frontend"
+    owner: "@revex"
+
+  - repo: ghl-revex-frontend
+    path_prefix: "apps/yext/"
+    product: "Revex — Yext Frontend"
+    owner: "@revex"
+
+  # ──────────────────────────────────────────────────────────
+  # ──── CRM ────
+  # ──────────────────────────────────────────────────────────
+  - repo: appengine-local-taskqueue
+    path_prefix: ""
+    product: "CRM — AppEngine Local Task Queue"
+    owner: "@crm"
+
+  - repo: chrome-ext-crm
+    path_prefix: ""
+    product: "CRM — Chrome Extension"
+    owner: "@crm"
+
+  - repo: crm-common-libs
+    path_prefix: ""
+    product: "CRM — Common Libraries"
+    owner: "@crm"
+
+  - repo: vibe-tagger
+    path_prefix: ""
+    product: "CRM — Vibe Tagger"
+    owner: "@crm"
+
+  # ghl-crm-frontend — monorepo additional apps
+  - repo: ghl-crm-frontend
+    path_prefix: "apps/ai-employees/"
+    product: "AI — Employees CRM Frontend"
+    owner: "@ai"
+
+  - repo: ghl-crm-frontend
+    path_prefix: "apps/contacts/"
+    product: "CRM — Contacts"
+    owner: "@crm"
+
+  - repo: ghl-crm-frontend
+    path_prefix: "apps/contacts-highrise/"
+    product: "CRM — Contacts Highrise"
+    owner: "@crm"
+
+  - repo: ghl-crm-frontend
+    path_prefix: "apps/contacts-restore/"
+    product: "CRM — Contacts Restore"
+    owner: "@crm"
+
+  - repo: ghl-crm-frontend
+    path_prefix: "apps/conversations-new-ui/"
+    product: "CRM — Conversations New UI"
+    owner: "@crm-conversations"
+
+  - repo: ghl-crm-frontend
+    path_prefix: "apps/conversations-utilities/"
+    product: "CRM — Conversations Utilities"
+    owner: "@crm-conversations"
+
+  - repo: ghl-crm-frontend
+    path_prefix: "apps/crm-objects-settings/"
+    product: "CRM — Objects Settings"
+    owner: "@crm"
+
+  - repo: ghl-crm-frontend
+    path_prefix: "apps/custom-fields/"
+    product: "CRM — Custom Fields"
+    owner: "@crm"
+
+  - repo: ghl-crm-frontend
+    path_prefix: "apps/custom-objects/"
+    product: "CRM — Custom Objects"
+    owner: "@crm"
+
+  - repo: ghl-crm-frontend
+    path_prefix: "apps/documents/"
+    product: "CRM — Documents"
+    owner: "@crm"
+
+  - repo: ghl-crm-frontend
+    path_prefix: "apps/integrations/"
+    product: "CRM — Integrations"
+    owner: "@crm"
+
+  - repo: ghl-crm-frontend
+    path_prefix: "apps/labs/"
+    product: "CRM — Labs"
+    owner: "@crm"
+
+  - repo: ghl-crm-frontend
+    path_prefix: "apps/leadconnector-integrations/"
+    product: "CRM — LeadConnector Integrations"
+    owner: "@crm"
+
+  - repo: ghl-crm-frontend
+    path_prefix: "apps/opportunities/"
+    product: "CRM — Opportunities"
+    owner: "@crm"
+
+  - repo: ghl-crm-frontend
+    path_prefix: "apps/preference-management/"
+    product: "CRM — Preference Management"
+    owner: "@crm"
+
+  - repo: ghl-crm-frontend
+    path_prefix: "apps/record-components/"
+    product: "CRM — Record Components"
+    owner: "@crm"
+
+  - repo: ghl-crm-frontend
+    path_prefix: "apps/rollup/"
+    product: "CRM — Rollup"
+    owner: "@crm"
+
+  - repo: ghl-crm-frontend
+    path_prefix: "apps/users/"
+    product: "CRM — Users"
+    owner: "@crm"
+
+  - repo: ghl-crm-frontend
+    path_prefix: "apps/voice-ai/"
+    product: "AI — Voice AI CRM"
+    owner: "@ai"
+
+  # ──────────────────────────────────────────────────────────
+  # ──── CONVERSATIONS ────
+  # ──────────────────────────────────────────────────────────
+  - repo: ghl-chat-widget
+    path_prefix: ""
+    product: "Conversations — Chat Widget"
+    owner: "@conversations"
+
+  - repo: ghl-email-builder
+    path_prefix: ""
+    product: "Conversations — Email Builder"
+    owner: "@conversations"
+
+  - repo: ghl-smtp-service
+    path_prefix: ""
+    product: "Conversations — SMTP Service"
+    owner: "@conversations"
+
+  - repo: py-chatbot
+    path_prefix: ""
+    product: "Conversations — Python Chatbot"
+    owner: "@conversations"
+
+  - repo: revops-chatgpt-mcp-snowflake-server
+    path_prefix: ""
+    product: "Conversations — ChatGPT MCP Snowflake Server"
+    owner: "@conversations"
+
+  - repo: whatsapp-analytics-backup-scipts
+    path_prefix: ""
+    product: "Conversations — WhatsApp Analytics Backup Scripts"
+    owner: "@conversations"
+
+  # ──────────────────────────────────────────────────────────
+  # ──── CALENDARS ────
+  # ──────────────────────────────────────────────────────────
+  - repo: assignment_calendar
+    path_prefix: ""
+    product: "Calendars — Assignment Calendar"
+    owner: "@calendars"
+
+  - repo: automation-calendars-deep-links
+    path_prefix: ""
+    product: "Calendars — Deep Links"
+    owner: "@calendars"
+
+  - repo: automation-calendars-frontend
+    path_prefix: ""
+    product: "Calendars — Frontend"
+    owner: "@calendars"
+
+  - repo: automation-calendars-frontend-monorepo
+    path_prefix: ""
+    product: "Calendars — Frontend Monorepo"
+    owner: "@calendars"
+
+  - repo: automation-calendars-preview
+    path_prefix: ""
+    product: "Calendars — Preview"
+    owner: "@calendars"
+
+  - repo: automation-calendars-reserve-backend
+    path_prefix: ""
+    product: "Calendars — Reserve Backend"
+    owner: "@calendars"
+
+  - repo: ghl-calendars-ai-skills
+    path_prefix: ""
+    product: "Calendars — AI Skills"
+    owner: "@calendars"
+
+  - repo: ghl-calendars-platform
+    path_prefix: ""
+    product: "Calendars — Platform"
+    owner: "@calendars"
+
+  - repo: vue-tuicalendar
+    path_prefix: ""
+    product: "Calendars — Vue TUI Calendar"
+    owner: "@calendars"
+
+  # ──────────────────────────────────────────────────────────
+  # ──── FUNNELS ────
+  # ──────────────────────────────────────────────────────────
+  - repo: builder-preview
+    path_prefix: ""
+    product: "Funnels — Builder Preview"
+    owner: "@funnels"
+
+  - repo: funnel-preview-cache
+    path_prefix: ""
+    product: "Funnels — Preview Cache"
+    owner: "@funnels"
+
+  - repo: ghl-blogging
+    path_prefix: ""
+    product: "Funnels — Blogging"
+    owner: "@funnels"
+
+  - repo: ghl-form-ai-studio
+    path_prefix: ""
+    product: "Funnels — Form AI Studio"
+    owner: "@funnels"
+
+  - repo: ghl-form-element
+    path_prefix: ""
+    product: "Funnels — Form Element"
+    owner: "@funnels"
+
+  - repo: ghl-form-embed
+    path_prefix: ""
+    product: "Funnels — Form Embed"
+    owner: "@funnels"
+
+  - repo: ghl-form-survey
+    path_prefix: ""
+    product: "Funnels — Form Survey"
+    owner: "@funnels"
+
+  - repo: ghl-funnel-website
+    path_prefix: ""
+    product: "Funnels — Funnel Website"
+    owner: "@funnels"
+
+  - repo: leadgen-funnels-backend
+    path_prefix: ""
+    product: "Funnels — Backend"
+    owner: "@funnels"
+
+  - repo: page-builder
+    path_prefix: ""
+    product: "Funnels — Page Builder"
+    owner: "@funnels"
+
+  - repo: spm-appengine
+    path_prefix: ""
+    product: "Funnels — SPM AppEngine"
+    owner: "@funnels"
+
+  - repo: spm-proxy-server
+    path_prefix: ""
+    product: "Funnels — SPM Proxy Server"
+    owner: "@funnels"
+
+  - repo: spm-ts
+    path_prefix: ""
+    product: "Funnels — SPM TypeScript Shell"
+    owner: "@funnels"
+
+  # ──────────────────────────────────────────────────────────
+  # ──── PAYMENTS ────
+  # ──────────────────────────────────────────────────────────
+  - repo: affiliate-signup-page
+    path_prefix: ""
+    product: "Payments — Affiliate Signup Page"
+    owner: "@payments"
+
+  - repo: ghl-invoice-preview
+    path_prefix: ""
+    product: "Payments — Invoice Preview"
+    owner: "@payments"
+
+  - repo: ghl-leadgen-payments
+    path_prefix: ""
+    product: "Payments — Leadgen Payments"
+    owner: "@payments"
+
+  - repo: ghl-payment-element
+    path_prefix: ""
+    product: "Payments — Payment Element"
+    owner: "@payments"
+
+  - repo: leadgen-payment-products-backend
+    path_prefix: ""
+    product: "Payments — Payment Products Backend"
+    owner: "@payments"
+
+  - repo: mobile-square-in-app-payments
+    path_prefix: ""
+    product: "Payments — Mobile Square In-App Payments"
+    owner: "@payments"
+
+  - repo: module-stripe
+    path_prefix: ""
+    product: "Payments — Stripe Module"
+    owner: "@payments"
+
+  - repo: payment-products-preview
+    path_prefix: ""
+    product: "Payments — Payment Products Preview"
+    owner: "@payments"
+
+  - repo: payment-service
+    path_prefix: ""
+    product: "Payments — Payment Service"
+    owner: "@payments"
+
+  # ──────────────────────────────────────────────────────────
+  # ──── MARKETING ────
+  # ──────────────────────────────────────────────────────────
+  - repo: automation-am-frontend
+    path_prefix: ""
+    product: "Automation — AM Frontend"
+    owner: "@marketing"
+
+  - repo: automation-am-reward-fronted
+    path_prefix: ""
+    product: "Automation — AM Reward Frontend"
+    owner: "@marketing"
+
+  - repo: automation-apps-backend
+    path_prefix: ""
+    product: "Automation — Apps Backend"
+    owner: "@marketing"
+
+  - repo: automation-data-bi-platform
+    path_prefix: ""
+    product: "Automation — Data BI Platform"
+    owner: "@marketing"
+
+  - repo: automation-eliza-backend
+    path_prefix: ""
+    product: "Automation — Eliza Backend"
+    owner: "@marketing"
+
+  - repo: automation-eliza-frontend
+    path_prefix: ""
+    product: "Automation — Eliza Frontend"
+    owner: "@marketing"
+
+  - repo: automation-next-apps-backend
+    path_prefix: ""
+    product: "Automation — Next Apps Backend"
+    owner: "@marketing"
+
+  - repo: automation-workflows-ai
+    path_prefix: ""
+    product: "Automation — Workflows AI"
+    owner: "@marketing"
+
+  - repo: automation-workflows-ai-pilot
+    path_prefix: ""
+    product: "Automation — Workflows AI Pilot"
+    owner: "@marketing"
+
+  - repo: automation-workflows-backend
+    path_prefix: ""
+    product: "Automation — Workflows Backend"
+    owner: "@marketing"
+
+  - repo: automation-workflows-frontend
+    path_prefix: ""
+    product: "Automation — Workflows Frontend"
+    owner: "@marketing"
+
+  - repo: automation-workflows-iatf-ai-agent
+    path_prefix: ""
+    product: "Automation — Workflows IATF AI Agent"
+    owner: "@marketing"
+
+  - repo: automation-workflows-iatf-frontend
+    path_prefix: ""
+    product: "Automation — Workflows IATF Frontend"
+    owner: "@marketing"
+
+  - repo: automation-workflows-ui-mcp
+    path_prefix: ""
+    product: "Automation — Workflows UI MCP"
+    owner: "@marketing"
+
+  - repo: automation-workflows-validators
+    path_prefix: ""
+    product: "Automation — Workflows Validators"
+    owner: "@marketing"
+
+  - repo: Calender_Automation_Assignment_Daksh
+    path_prefix: ""
+    product: "Automation — Calendar Assignment"
+    owner: "@marketing"
+
+  - repo: doc-preview
+    path_prefix: ""
+    product: "Marketing — Doc Preview"
+    owner: "@marketing"
+
+  - repo: domain-reputation
+    path_prefix: ""
+    product: "Marketing — Domain Reputation"
+    owner: "@marketing"
+
+  - repo: email-preview
+    path_prefix: ""
+    product: "Marketing — Email Preview"
+    owner: "@marketing"
+
+  - repo: ghl-mobileAutomation
+    path_prefix: ""
+    product: "Automation — Mobile Automation"
+    owner: "@marketing"
+
+  - repo: ghl-social-media-external
+    path_prefix: ""
+    product: "Marketing — Social Media External"
+    owner: "@marketing"
+
+  - repo: ghl-social-media-posting
+    path_prefix: ""
+    product: "Marketing — Social Media Posting"
+    owner: "@marketing"
+
+  - repo: Gokollab-Native-Automation
+    path_prefix: ""
+    product: "Automation — Gokollab Native"
+    owner: "@marketing"
+
+  - repo: hl-automation-project-template
+    path_prefix: ""
+    product: "Automation — Project Template"
+    owner: "@marketing"
+
+  - repo: leadgen-store-preview
+    path_prefix: ""
+    product: "Marketing — Store Preview"
+    owner: "@marketing"
+
+  - repo: marketplace-app-review-agents
+    path_prefix: ""
+    product: "Marketing — Marketplace App Review Agents"
+    owner: "@marketing"
+
+  - repo: private-github-workflows
+    path_prefix: ""
+    product: "Automation — Private GitHub Workflows"
+    owner: "@marketing"
+
+  - repo: revops-automation
+    path_prefix: ""
+    product: "Automation — RevOps"
+    owner: "@marketing"
+
+  - repo: workflow-importers-IR-model
+    path_prefix: ""
+    product: "Automation — Workflow Importers IR Model"
+    owner: "@marketing"
+
+  - repo: workflow-mcp-server
+    path_prefix: ""
+    product: "Automation — Workflow MCP Server"
+    owner: "@marketing"
+
+  # ──────────────────────────────────────────────────────────
+  # ──── PHONE ────
+  # ──────────────────────────────────────────────────────────
+  - repo: twilio_voice_federated
+    path_prefix: ""
+    product: "Phone — Twilio Voice Federated"
+    owner: "@phone"
+
+  - repo: voice-ai-mindcast
+    path_prefix: ""
+    product: "Phone — Voice AI Mindcast"
+    owner: "@phone"
+
+  # ──────────────────────────────────────────────────────────
+  # ──── REPORTING ────
+  # ──────────────────────────────────────────────────────────
+  - repo: data-platform-core
+    path_prefix: ""
+    product: "Reporting — Data Platform Core"
+    owner: "@reporting"
+
+  - repo: leadgen-reporting-ads-backend
+    path_prefix: ""
+    product: "Reporting — Ads Backend"
+    owner: "@reporting"
+
+  - repo: leadgen-reporting-attribution-backend
+    path_prefix: ""
+    product: "Reporting — Attribution Backend"
+    owner: "@reporting"
+
+  - repo: leadgen-reporting-frontend
+    path_prefix: ""
+    product: "Reporting — Frontend"
+    owner: "@reporting"
+
+  - repo: leadgen-reporting-messages-backend
+    path_prefix: ""
+    product: "Reporting — Messages Backend"
+    owner: "@reporting"
+
+  # ──────────────────────────────────────────────────────────
+  # ──── SAAS ────
+  # ──────────────────────────────────────────────────────────
+  - repo: AgencyUX
+    path_prefix: ""
+    product: "SaaS — Agency UX"
+    owner: "@saas"
+
+  - repo: ghl-marketplace-app-template
+    path_prefix: ""
+    product: "SaaS — Marketplace App Template"
+    owner: "@saas"
+
+  - repo: leadgen-marketplace-backend
+    path_prefix: ""
+    product: "SaaS — Leadgen Marketplace Backend"
+    owner: "@saas"
+
+  - repo: marketplace-backend
+    path_prefix: ""
+    product: "SaaS — Marketplace Backend"
+    owner: "@saas"
+
+  - repo: marketplace-backend-demo
+    path_prefix: ""
+    product: "SaaS — Marketplace Backend Demo"
+    owner: "@saas"
+
+  - repo: marketplace-frontend
+    path_prefix: ""
+    product: "SaaS — Marketplace Frontend"
+    owner: "@saas"
+
+  - repo: saas-service
+    path_prefix: ""
+    product: "SaaS — Service"
+    owner: "@saas"
+
+  # ──────────────────────────────────────────────────────────
+  # ──── INTEGRATIONS ────
+  # ──────────────────────────────────────────────────────────
+  - repo: highlevel-zapier
+    path_prefix: ""
+    product: "Integrations — Zapier"
+    owner: "@integrations"
+
+  - repo: hr-integration
+    path_prefix: ""
+    product: "Integrations — HR Integration"
+    owner: "@integrations"
+
+  - repo: integration-core
+    path_prefix: ""
+    product: "Integrations — Core Library"
+    owner: "@integrations"
+
+  - repo: leadconnector
+    path_prefix: ""
+    product: "Integrations — LeadConnector"
+    owner: "@integrations"
+
+  # ──────────────────────────────────────────────────────────
+  # ──── AI ────
+  # ──────────────────────────────────────────────────────────
+
+  # ai-backend — monorepo with sub-path entries
+  - repo: ai-backend
+    path_prefix: "apps/agent-execution/"
+    product: "AI — Agent Execution"
+    owner: "@ai"
+
+  - repo: ai-backend
+    path_prefix: "apps/agent-studio/"
+    product: "AI — Agent Studio Backend"
+    owner: "@ai"
+
+  - repo: ai-backend
+    path_prefix: "apps/ai-agents/"
+    product: "AI — Agents"
+    owner: "@ai"
+
+  - repo: ai-backend
+    path_prefix: "apps/ai-employees/"
+    product: "AI — Employees Backend"
+    owner: "@ai"
+
+  - repo: ai-backend
+    path_prefix: "apps/calendars/"
+    product: "AI — Calendars Backend"
+    owner: "@ai"
+
+  - repo: ai-backend
+    path_prefix: "apps/companies/"
+    product: "AI — Companies Backend"
+    owner: "@ai"
+
+  - repo: ai-backend
+    path_prefix: "apps/contacts/"
+    product: "AI — Contacts Backend"
+    owner: "@ai"
+
+  - repo: ai-backend
+    path_prefix: "apps/content/"
+    product: "AI — Content Backend"
+    owner: "@ai"
+
+  - repo: ai-backend
+    path_prefix: "apps/conversations/"
+    product: "AI — Conversations Backend"
+    owner: "@ai"
+
+  - repo: ai-backend
+    path_prefix: "apps/conversations-ai/"
+    product: "AI — Conversations AI"
+    owner: "@ai"
+
+  - repo: ai-backend
+    path_prefix: "apps/copilot/"
+    product: "AI — Copilot Backend"
+    owner: "@ai"
+
+  - repo: ai-backend
+    path_prefix: "apps/email-isv/"
+    product: "AI — Email ISV Backend"
+    owner: "@ai"
+
+  - repo: ai-backend
+    path_prefix: "apps/evaluations-ai/"
+    product: "AI — Evaluations"
+    owner: "@ai"
+
+  - repo: ai-backend
+    path_prefix: "apps/ghl-mcp/"
+    product: "AI — GHL MCP Backend"
+    owner: "@ai"
+
+  - repo: ai-backend
+    path_prefix: "apps/iam/"
+    product: "AI — IAM Backend"
+    owner: "@ai"
+
+  - repo: ai-backend
+    path_prefix: "apps/knowledge-base/"
+    product: "AI — Knowledge Base Backend"
+    owner: "@ai"
+
+  - repo: ai-backend
+    path_prefix: "apps/locations/"
+    product: "AI — Locations Backend"
+    owner: "@ai"
+
+  - repo: ai-backend
+    path_prefix: "apps/logs/"
+    product: "AI — Logs Backend"
+    owner: "@ai"
+
+  - repo: ai-backend
+    path_prefix: "apps/oauth/"
+    product: "AI — OAuth Backend"
+    owner: "@ai"
+
+  - repo: ai-backend
+    path_prefix: "apps/performance-ai/"
+    product: "AI — Performance AI Backend"
+    owner: "@ai"
+
+  - repo: ai-backend
+    path_prefix: "apps/support-ai/"
+    product: "AI — Support AI Backend"
+    owner: "@ai"
+
+  - repo: ai-backend
+    path_prefix: "apps/users/"
+    product: "AI — Users Backend"
+    owner: "@ai"
+
+  - repo: ai-backend
+    path_prefix: "apps/voice-ai/"
+    product: "AI — Voice AI Backend"
+    owner: "@ai"
+
+  - repo: ai-backend
+    path_prefix: "apps/ai-utilities-packages/"
+    product: "AI — Utilities Packages"
+    owner: "@ai"
+
+  # ai-frontend — monorepo with sub-path entries
+  - repo: ai-frontend
+    path_prefix: "apps/agent-builder/"
+    product: "AI — Agent Builder Frontend"
+    owner: "@ai"
+
+  - repo: ai-frontend
+    path_prefix: "apps/agent-studio/"
+    product: "AI — Agent Studio Frontend"
+    owner: "@ai"
+
+  - repo: ai-frontend
+    path_prefix: "apps/ai-components/"
+    product: "AI — Components Library"
+    owner: "@ai"
+
+  - repo: ai-frontend
+    path_prefix: "apps/ai-employees/"
+    product: "AI — Employees Frontend"
+    owner: "@ai"
+
+  - repo: ai-frontend
+    path_prefix: "apps/copilot/"
+    product: "AI — Copilot Frontend"
+    owner: "@ai"
+
+  - repo: ai-frontend
+    path_prefix: "apps/knowledge-base/"
+    product: "AI — Knowledge Base Frontend"
+    owner: "@ai"
+
+  - repo: ai-frontend
+    path_prefix: "apps/performance-ai/"
+    product: "AI — Performance AI Frontend"
+    owner: "@ai"
+
+  - repo: ai-partners-frontend
+    path_prefix: ""
+    product: "AI — Partners Frontend"
+    owner: "@ai"
+
+  - repo: evaluations-ai-frontend
+    path_prefix: ""
+    product: "AI — Evaluations Frontend"
+    owner: "@ai"
+
+  - repo: ghl-content-ai
+    path_prefix: ""
+    product: "AI — Content AI"
+    owner: "@ai"
+
+  - repo: ghl-rag-framework
+    path_prefix: ""
+    product: "AI — RAG Framework"
+    owner: "@ai"
+
+  - repo: highlevel-employee-portal
+    path_prefix: ""
+    product: "AI — Employee Portal"
+    owner: "@ai"
+
+  - repo: onboarding-fuzzy-inference
+    path_prefix: ""
+    product: "AI — Onboarding Fuzzy Inference"
+    owner: "@ai"
+
+  - repo: platform-ai
+    path_prefix: ""
+    product: "AI — Platform AI"
+    owner: "@ai"
+
+  - repo: vertical-ai
+    path_prefix: ""
+    product: "AI — Vertical AI"
+    owner: "@ai"
