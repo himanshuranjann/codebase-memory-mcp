@@ -2479,3 +2479,689 @@ mappings:
     path_prefix: ""
     product: "AI — Vertical AI"
     owner: "@ai"
+
+  # ──────────────────────────────────────────────────────────
+  # Additional repos — 100% GHL fleet coverage backfill
+  # ──────────────────────────────────────────────────────────
+
+  # ── PLATFORM (additional) ──
+
+  - repo: Build-settings
+    path_prefix: ""
+    product: "Platform — Build Settings"
+    owner: "@platform"
+
+  - repo: FigmaJSONtoComponent
+    path_prefix: ""
+    product: "Platform — Figma JSON to Component"
+    owner: "@platform"
+
+  - repo: GoHighLevel
+    path_prefix: ""
+    product: "Platform — Main Repository"
+    owner: "@platform"
+
+  - repo: HighSupply
+    path_prefix: ""
+    product: "Platform — HighSupply"
+    owner: "@platform"
+
+  - repo: Module-Federated-Code-generator
+    path_prefix: ""
+    product: "Platform — Module Federation Code Generator — Tooling"
+    owner: "@platform"
+
+  - repo: Sandbox
+    path_prefix: ""
+    product: "Platform — Sandbox — Tooling"
+    owner: "@platform"
+
+  - repo: TPRA
+    path_prefix: ""
+    product: "Platform — TPRA"
+    owner: "@platform"
+
+  - repo: api-documentation
+    path_prefix: ""
+    product: "Platform — API Documentation — Docs"
+    owner: "@platform"
+
+  - repo: branch-test-repo
+    path_prefix: ""
+    product: "Platform — Branch Test Repo — Tests"
+    owner: "@platform"
+
+  - repo: canary-flow
+    path_prefix: ""
+    product: "Platform — Canary Flow"
+    owner: "@platform"
+
+  - repo: cbr
+    path_prefix: ""
+    product: "Platform — Internal — CBR"
+    owner: "@platform"
+
+  - repo: code-coverage
+    path_prefix: ""
+    product: "Platform — Code Coverage"
+    owner: "@platform"
+
+  - repo: colorcounter
+    path_prefix: ""
+    product: "Platform — Color Counter"
+    owner: "@platform"
+
+  - repo: crud-test
+    path_prefix: ""
+    product: "Platform — CRUD Test — Tests"
+    owner: "@platform"
+
+  - repo: csv-xls-exporter
+    path_prefix: ""
+    product: "Platform — CSV/XLS Exporter"
+    owner: "@platform"
+
+  - repo: dev-commerce-img-optimiser
+    path_prefix: ""
+    product: "Platform — Commerce Image Optimiser"
+    owner: "@platform"
+
+  - repo: dev-conventions
+    path_prefix: ""
+    product: "Platform — Dev Conventions"
+    owner: "@platform"
+
+  - repo: dev-docs
+    path_prefix: ""
+    product: "Platform — Dev Docs — Docs"
+    owner: "@platform"
+
+  - repo: email-builder-tools
+    path_prefix: ""
+    product: "Platform — Email Builder Tools — Tooling"
+    owner: "@platform"
+
+  - repo: fd-test
+    path_prefix: ""
+    product: "Platform — Frontend Test — Tests"
+    owner: "@platform"
+
+  - repo: flutter-ffmpeg-kit
+    path_prefix: ""
+    product: "Platform — Flutter FFmpeg Kit"
+    owner: "@platform"
+
+  - repo: flutter-layrkit
+    path_prefix: ""
+    product: "Platform — Flutter LayrKit"
+    owner: "@platform"
+
+  - repo: flutter_html
+    path_prefix: ""
+    product: "Platform — Flutter HTML"
+    owner: "@platform"
+
+  - repo: flutter_icon54
+    path_prefix: ""
+    product: "Platform — Flutter Icon54"
+    owner: "@platform"
+
+  - repo: flutter_launcher_icons
+    path_prefix: ""
+    product: "Platform — Flutter Launcher Icons"
+    owner: "@platform"
+
+  - repo: flutter_native_splash
+    path_prefix: ""
+    product: "Platform — Flutter Native Splash"
+    owner: "@platform"
+
+  - repo: flutter_untitled_ui_icons
+    path_prefix: ""
+    product: "Platform — Flutter Untitled UI Icons"
+    owner: "@platform"
+
+  - repo: frontend-codemods
+    path_prefix: ""
+    product: "Platform — Frontend Codemods"
+    owner: "@platform"
+
+  - repo: ghl-backend-repo-template
+    path_prefix: ""
+    product: "Platform — Backend Repo Template"
+    owner: "@platform"
+
+  - repo: ghl-cursor-rules
+    path_prefix: ""
+    product: "Platform — Cursor Rules"
+    owner: "@platform"
+
+  - repo: ghl-cursor-skills
+    path_prefix: ""
+    product: "Platform — Cursor Skills"
+    owner: "@platform"
+
+  - repo: ghl-docs-hub
+    path_prefix: ""
+    product: "Platform — Docs Hub — Docs"
+    owner: "@platform"
+
+  - repo: ghl-icons
+    path_prefix: ""
+    product: "Platform — Icons"
+    owner: "@platform"
+
+  - repo: ghl-kollab-ci-certificates
+    path_prefix: ""
+    product: "Platform — Kollab CI Certificates"
+    owner: "@platform"
+
+  - repo: ghl-liquibase
+    path_prefix: ""
+    product: "Platform — Liquibase"
+    owner: "@platform"
+
+  - repo: ghl-magic-studio
+    path_prefix: ""
+    product: "Platform — Magic Studio"
+    owner: "@platform"
+
+  - repo: ghl-mobile-ci-certificates
+    path_prefix: ""
+    product: "Platform — Mobile CI Certificates"
+    owner: "@platform"
+
+  - repo: ghl-nestjs-boilerplate
+    path_prefix: ""
+    product: "Platform — NestJS Boilerplate"
+    owner: "@platform"
+
+  - repo: ghl-pam-logging
+    path_prefix: ""
+    product: "Platform — PAM Logging"
+    owner: "@platform"
+
+  - repo: ghl-pr-ops
+    path_prefix: ""
+    product: "Platform — PR Ops"
+    owner: "@platform"
+
+  - repo: ghl-rbac-test-suite
+    path_prefix: ""
+    product: "Platform — RBAC Test Suite — Tests"
+    owner: "@platform"
+
+  - repo: ghl-test-management
+    path_prefix: ""
+    product: "Platform — Test Management — Tests"
+    owner: "@platform"
+
+  - repo: ghl-test-platform
+    path_prefix: ""
+    product: "Platform — Test Platform — Tests"
+    owner: "@platform"
+
+  - repo: ghl-tourguide
+    path_prefix: ""
+    product: "Platform — Tourguide — Docs"
+    owner: "@platform"
+
+  - repo: ghl_vision_flutter
+    path_prefix: ""
+    product: "Platform — Vision Flutter"
+    owner: "@platform"
+
+  - repo: giscus-ghl
+    path_prefix: ""
+    product: "Platform — Giscus"
+    owner: "@platform"
+
+  - repo: github-actions
+    path_prefix: ""
+    product: "Platform — GitHub Actions"
+    owner: "@platform"
+
+  - repo: high-rise-flutter-colors
+    path_prefix: ""
+    product: "Platform — Highrise Flutter Colors"
+    owner: "@platform"
+
+  - repo: high_canopy
+    path_prefix: ""
+    product: "Platform — High Canopy"
+    owner: "@platform"
+
+  - repo: highlevel-flutter
+    path_prefix: ""
+    product: "Platform — Highlevel Flutter"
+    owner: "@platform"
+
+  - repo: highlevel-html
+    path_prefix: ""
+    product: "Platform — Highlevel HTML"
+    owner: "@platform"
+
+  - repo: highlevel.handbook.github.io
+    path_prefix: ""
+    product: "Platform — Handbook — Docs"
+    owner: "@platform"
+
+  - repo: highrise-flutter
+    path_prefix: ""
+    product: "Platform — Highrise Flutter"
+    owner: "@platform"
+
+  - repo: hist
+    path_prefix: ""
+    product: "Platform — Internal — Hist"
+    owner: "@platform"
+
+  - repo: hl-test-manager
+    path_prefix: ""
+    product: "Platform — HL Test Manager — Tests"
+    owner: "@platform"
+
+  - repo: hugo-book
+    path_prefix: ""
+    product: "Platform — Hugo Book"
+    owner: "@platform"
+
+  - repo: i18n-test
+    path_prefix: ""
+    product: "Platform — i18n Test — Tests"
+    owner: "@platform"
+
+  - repo: infra-q2
+    path_prefix: ""
+    product: "Platform — Infra Q2"
+    owner: "@platform"
+
+  - repo: internaltools-migrations
+    path_prefix: ""
+    product: "Platform — Internal Tools Migrations — Tooling"
+    owner: "@platform"
+
+  - repo: kubernetes-mixin
+    path_prefix: ""
+    product: "Platform — Kubernetes Mixin"
+    owner: "@platform"
+
+  - repo: langfuse-region-migration
+    path_prefix: ""
+    product: "Platform — Langfuse Region Migration — Tooling"
+    owner: "@platform"
+
+  - repo: leadgen-fastpaydirect-static
+    path_prefix: ""
+    product: "Platform — Leadgen FastPayDirect Static"
+    owner: "@platform"
+
+  - repo: leadgen-tests
+    path_prefix: ""
+    product: "Platform — Lead Gen Tests — Tests"
+    owner: "@platform"
+
+  - repo: mail_beam
+    path_prefix: ""
+    product: "Platform — Mail Beam"
+    owner: "@platform"
+
+  - repo: manifest
+    path_prefix: ""
+    product: "Platform — Manifest"
+    owner: "@platform"
+
+  - repo: mobile-patch-release-dispatch
+    path_prefix: ""
+    product: "Platform — Mobile Patch Release Dispatch"
+    owner: "@platform"
+
+  - repo: mobile-prds
+    path_prefix: ""
+    product: "Platform — Mobile PRDs — Docs"
+    owner: "@platform"
+
+  - repo: mobile-whitelabelcustomizer-dasboard
+    path_prefix: ""
+    product: "Platform — Mobile Whitelabel Customizer Dashboard"
+    owner: "@platform"
+
+  - repo: mobile_native_app_theme
+    path_prefix: ""
+    product: "Platform — Mobile Native App Theme"
+    owner: "@platform"
+
+  - repo: nik-shivam
+    path_prefix: ""
+    product: "Platform — Internal — Nik Shivam"
+    owner: "@platform"
+
+  - repo: platform-docs
+    path_prefix: ""
+    product: "Platform — Platform Docs — Docs"
+    owner: "@platform"
+
+  - repo: platform-planning-internal
+    path_prefix: ""
+    product: "Platform — Planning Internal"
+    owner: "@platform"
+
+  - repo: platform-templates
+    path_prefix: ""
+    product: "Platform — Templates"
+    owner: "@platform"
+
+  - repo: pocketpub
+    path_prefix: ""
+    product: "Platform — PocketPub"
+    owner: "@platform"
+
+  - repo: pr-buddy
+    path_prefix: ""
+    product: "Platform — PR Buddy"
+    owner: "@platform"
+
+  - repo: project-orion
+    path_prefix: ""
+    product: "Platform — Project Orion"
+    owner: "@platform"
+
+  - repo: push-docker-gcr
+    path_prefix: ""
+    product: "Platform — Push Docker GCR — Infra"
+    owner: "@platform"
+
+  - repo: revops-mozart-transforms
+    path_prefix: ""
+    product: "Platform — RevOps Mozart Transforms"
+    owner: "@platform"
+
+  - repo: sdet-performance-test
+    path_prefix: ""
+    product: "Platform — SDET Performance Test — Tests"
+    owner: "@platform"
+
+  - repo: sdet-platform-performance-test
+    path_prefix: ""
+    product: "Platform — SDET Platform Performance Test — Tests"
+    owner: "@platform"
+
+  - repo: sentry
+    path_prefix: ""
+    product: "Platform — Sentry"
+    owner: "@platform"
+
+  - repo: sonarcloud-test-repo-public
+    path_prefix: ""
+    product: "Platform — SonarCloud Test Repo — Tests"
+    owner: "@platform"
+
+  - repo: sonarqube-jenkins-test
+    path_prefix: ""
+    product: "Platform — SonarQube Jenkins Test — Tests"
+    owner: "@platform"
+
+  - repo: sonarqube-jenkins-test-2
+    path_prefix: ""
+    product: "Platform — SonarQube Jenkins Test 2 — Tests"
+    owner: "@platform"
+
+  - repo: sravanth-docs
+    path_prefix: ""
+    product: "Platform — Sravanth Docs — Docs"
+    owner: "@platform"
+
+  - repo: supportAILabs
+    path_prefix: ""
+    product: "Platform — Support AI Labs"
+    owner: "@platform"
+
+  - repo: test-repo
+    path_prefix: ""
+    product: "Platform — Test Repo"
+    owner: "@platform"
+
+  - repo: ui-ux-gap-analysis
+    path_prefix: ""
+    product: "Platform — UI/UX Gap Analysis"
+    owner: "@platform"
+
+  - repo: vue-ssr-demo
+    path_prefix: ""
+    product: "Platform — Vue SSR Demo — Tooling"
+    owner: "@platform"
+
+  - repo: webstore-extensions
+    path_prefix: ""
+    product: "Platform — Webstore Extensions"
+    owner: "@platform"
+
+  - repo: whitelabel-customizer-frontend
+    path_prefix: ""
+    product: "Platform — Whitelabel Customizer Frontend"
+    owner: "@platform"
+
+  - repo: wordpress_plugins
+    path_prefix: ""
+    product: "Platform — WordPress Plugins"
+    owner: "@platform"
+
+  - repo: yarn-poc
+    path_prefix: ""
+    product: "Platform — Yarn POC — Tooling"
+    owner: "@platform"
+
+  # ── CRM (additional) ──
+
+  - repo: core-crm-tests
+    path_prefix: ""
+    product: "CRM — Core Tests — Tests"
+    owner: "@crm"
+
+  - repo: crm-extension-privacy-policy
+    path_prefix: ""
+    product: "CRM — Extension Privacy Policy"
+    owner: "@crm"
+
+  - repo: flutter_contacts
+    path_prefix: ""
+    product: "CRM — Flutter Contacts"
+    owner: "@crm"
+
+  # ── REVEX (additional) ──
+
+  - repo: RevexMobileTestAutomation
+    path_prefix: ""
+    product: "Revex — Mobile Test Automation — Tests"
+    owner: "@revex"
+
+  - repo: communities-flutter-poc
+    path_prefix: ""
+    product: "Revex — Communities Flutter POC"
+    owner: "@revex-communities"
+
+  - repo: membership-highline
+    path_prefix: ""
+    product: "Revex — Membership Highline"
+    owner: "@revex-membership"
+
+  - repo: revex-tests
+    path_prefix: ""
+    product: "Revex — Tests — Tests"
+    owner: "@revex"
+
+  - repo: revex-tools-pyrw-audit-and-automation
+    path_prefix: ""
+    product: "Revex — Tools: PYRW Audit & Automation — Tooling"
+    owner: "@revex"
+
+  - repo: revex-wordpress-internal-tools
+    path_prefix: ""
+    product: "Revex — WordPress Internal Tools — Tooling"
+    owner: "@revex"
+
+  # ── AI (additional) ──
+
+  - repo: ai-employees-evals
+    path_prefix: ""
+    product: "AI — Employee Evals — Tests"
+    owner: "@ai"
+
+  - repo: ai-supervisor-prototype
+    path_prefix: ""
+    product: "AI — Supervisor Prototype — Tooling"
+    owner: "@ai"
+
+  - repo: ghl-ai-skills
+    path_prefix: ""
+    product: "AI — AI Skills"
+    owner: "@ai"
+
+  - repo: ghl-ai-test-generator
+    path_prefix: ""
+    product: "AI — Test Generator — Tests"
+    owner: "@ai"
+
+  - repo: ghl-aip
+    path_prefix: ""
+    product: "AI — AIP"
+    owner: "@ai"
+
+  - repo: onboarding-fuzzy-inference-system
+    path_prefix: ""
+    product: "AI — Onboarding Fuzzy Inference System"
+    owner: "@ai"
+
+  - repo: visibility-ai
+    path_prefix: ""
+    product: "AI — Visibility AI"
+    owner: "@ai"
+
+  - repo: zai-demo
+    path_prefix: ""
+    product: "AI — Zai Demo — Tooling"
+    owner: "@ai"
+
+  # ── MARKETING (additional) ──
+
+  - repo: WhiteLabel_Automation
+    path_prefix: ""
+    product: "Marketing — Whitelabel Automation"
+    owner: "@marketing"
+
+  - repo: automation-am-external-script
+    path_prefix: ""
+    product: "Marketing — AM External Script — Tooling"
+    owner: "@marketing"
+
+  - repo: automation-migration
+    path_prefix: ""
+    product: "Marketing — Migration — Tooling"
+    owner: "@marketing"
+
+  - repo: automation-sync-engine
+    path_prefix: ""
+    product: "Marketing — Sync Engine"
+    owner: "@marketing"
+
+  - repo: clickup-automation
+    path_prefix: ""
+    product: "Marketing — ClickUp Automation"
+    owner: "@marketing"
+
+  - repo: hiring-live-ai-workflows
+    path_prefix: ""
+    product: "Marketing — Hiring Live AI Workflows"
+    owner: "@marketing"
+
+  # ── CALENDARS (additional) ──
+
+  - repo: abhi_collective_calendar
+    path_prefix: ""
+    product: "Calendars — Collective Calendar"
+    owner: "@calendars"
+
+  - repo: calendars-learning-go
+    path_prefix: ""
+    product: "Calendars — Learning Go"
+    owner: "@calendars"
+
+  - repo: schedulers_dart
+    path_prefix: ""
+    product: "Calendars — Schedulers — Dart"
+    owner: "@calendars"
+
+  # ── PAYMENTS (additional) ──
+
+  - repo: authorize-net-playground
+    path_prefix: ""
+    product: "Payments — Authorize.net Playground — Tooling"
+    owner: "@payments"
+
+  - repo: dev-commerce-subscriptionsx
+    path_prefix: ""
+    product: "Payments — Commerce Subscriptions"
+    owner: "@payments"
+
+  - repo: ghl-payments-flutter
+    path_prefix: ""
+    product: "Payments — Flutter iOS SDK"
+    owner: "@payments"
+
+  # ── SAAS (additional) ──
+
+  - repo: ai-marketplace-tests
+    path_prefix: ""
+    product: "SaaS — AI Marketplace Tests — Tests"
+    owner: "@saas"
+
+  # ── REPORTING (additional) ──
+
+  - repo: data-dbt-analytics
+    path_prefix: ""
+    product: "Reporting — DBT Analytics"
+    owner: "@reporting"
+
+  - repo: data-dbt-data-foundation
+    path_prefix: ""
+    product: "Reporting — DBT Data Foundation"
+    owner: "@reporting"
+
+  - repo: data-dbt-starburst
+    path_prefix: ""
+    product: "Reporting — DBT Starburst"
+    owner: "@reporting"
+
+  - repo: ghl-attribution-external-script
+    path_prefix: ""
+    product: "Reporting — Attribution External Script — Tooling"
+    owner: "@reporting"
+
+  - repo: leadgen-reporting-ai
+    path_prefix: ""
+    product: "Reporting — Lead Gen Reporting AI"
+    owner: "@reporting"
+
+  - repo: marketplace-reporting-scripts
+    path_prefix: ""
+    product: "Reporting — Marketplace Reporting Scripts — Tooling"
+    owner: "@reporting"
+
+  # ── PHONE (additional) ──
+
+  - repo: flutter_libphonenumber
+    path_prefix: ""
+    product: "Phone — Flutter Libphonenumber"
+    owner: "@phone"
+
+  # ── INTEGRATIONS (additional) ──
+
+  - repo: leadconnector-plugin-wordpress
+    path_prefix: ""
+    product: "Integrations — LeadConnector WordPress Plugin"
+    owner: "@integrations"
+
+  - repo: oauth-demo
+    path_prefix: ""
+    product: "Integrations — OAuth Demo — Tooling"
+    owner: "@integrations"
