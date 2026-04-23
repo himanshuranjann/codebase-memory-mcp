@@ -21,6 +21,21 @@ var defaultProductMapYAML []byte
 //go:embed data/mfa_registry.yaml
 var defaultMFARegistryYAML []byte
 
+// semanticTaxonomyData ships with the binary alongside other enricher taxonomies.
+//
+//go:embed data/semantic_taxonomy.yaml
+var semanticTaxonomyData []byte
+
+// defaultTopicRegistryYAML maps pub/sub topic identifiers to downstream customer impact.
+//
+//go:embed data/topic_registry.yaml
+var defaultTopicRegistryYAML []byte
+
+// defaultRouteCallersYAML maps backend API path prefixes to frontend repos and MFA app keys.
+//
+//go:embed data/route_callers.yaml
+var defaultRouteCallersYAML []byte
+
 // LoadDefaultProductMap returns the product map embedded into the binary at
 // build time. Parsed once per process — callers should treat the returned
 // pointer as read-only. Returns a descriptive error only if the embedded YAML

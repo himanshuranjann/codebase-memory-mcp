@@ -1,0 +1,135 @@
+# semantic_taxonomy.yaml — hand-maintained semantic rules for cross-cutting
+# GHL product area classification based on source signals rather than repo path.
+
+rules:
+  - domain: Communities — Checkout
+    owner: "@revex-communities"
+    weight: 10
+    patterns:
+      class_name_contains:
+        - CommunityCheckout
+        - Community
+      import_contains:
+        - community-checkout
+        - communities/checkout
+      controller_prefix:
+        - community-checkout
+
+  - domain: Communities — Member Portal
+    owner: "@revex-communities"
+    weight: 8
+    patterns:
+      class_name_contains:
+        - CommunitiesGroup
+        - CommunitiesMember
+        - CommunityPost
+      import_contains:
+        - communities/groups
+        - communities/posts
+
+  - domain: Memberships — Checkout
+    owner: "@revex-memberships"
+    weight: 10
+    patterns:
+      class_name_contains:
+        - MembershipCheckout
+        - CheckoutOrchestration
+      import_contains:
+        - checkout-process
+        - checkout-orchestrat
+      controller_prefix:
+        - checkout
+
+  - domain: Memberships — Offers
+    owner: "@revex-memberships"
+    weight: 8
+    patterns:
+      class_name_contains:
+        - Offer
+        - MembershipOffer
+      import_contains:
+        - membership/offers
+      controller_prefix:
+        - offers
+        - membership/offers
+
+  - domain: Courses — Learner
+    owner: "@revex-courses"
+    weight: 8
+    patterns:
+      class_name_contains:
+        - Learner
+        - CourseLearner
+        - LearnerProgress
+      import_contains:
+        - courses-learners
+        - learner/
+      controller_prefix:
+        - learners
+        - courses/learners
+
+  - domain: GoKollab — Workspace
+    owner: "@revex-gokollab"
+    weight: 8
+    patterns:
+      class_name_contains:
+        - Gokollab
+        - GoKollab
+        - GoKollabWorkspace
+      import_contains:
+        - gokollab/
+      controller_prefix:
+        - gokollab
+
+  - domain: Client Portal
+    owner: "@revex-client-portal"
+    weight: 8
+    patterns:
+      class_name_contains:
+        - ClientPortal
+        - ClientportalMiddleware
+      import_contains:
+        - client-portal/
+        - clientportal/
+      controller_prefix:
+        - client-portal
+        - clientportal
+
+  - domain: Courses — Authoring
+    owner: "@revex-courses"
+    weight: 5
+    patterns:
+      class_name_contains:
+        - Course
+        - CourseBuilder
+        - CourseCategory
+      import_contains:
+        - courses/
+      controller_prefix:
+        - courses
+
+  - domain: Memberships — Access Control
+    owner: "@revex-memberships"
+    weight: 7
+    patterns:
+      class_name_contains:
+        - MemberAccess
+        - AccessControl
+        - ContentAccess
+      import_contains:
+        - membership/access
+      controller_prefix:
+        - membership/access
+
+  - domain: Communities — Feed
+    owner: "@revex-communities"
+    weight: 6
+    patterns:
+      class_name_contains:
+        - CommunityFeed
+        - CommunityPost
+        - FeedItem
+      import_contains:
+        - communities/feed
+      controller_prefix:
+        - communities/feed

@@ -22,6 +22,7 @@
 package enricher
 
 import (
+	"context"
 	"strings"
 )
 
@@ -45,6 +46,17 @@ type BuildCustomerSurfaceArgs struct {
 	// When provided, SPMT lookup is done by repo; standalone/SSR lookup is done
 	// by matching NestJS controller paths against backend_api_prefixes.
 	MFARegistry *MFARegistry
+	// TopicRegistry maps pub/sub topic identifiers to downstream customer impact.
+	// Nil disables event-chain impact enrichment.
+	TopicRegistry *TopicRegistry
+	// RouteCallersRegistry maps backend path prefixes to frontend callers/MFA keys.
+	// Nil disables route-callers enrichment.
+	RouteCallersRegistry *RouteCallersRegistry
+	// OrgEnricher performs dynamic org-wide search for callers/subscribers.
+	// Nil disables dynamic org-wide enrichment (static YAML only).
+	OrgEnricher *OrgEnricher
+	// Context for OrgEnricher searches. Required when OrgEnricher is set.
+	Ctx context.Context
 }
 
 // CustomerSurface is the fused per-file output.
@@ -82,6 +94,39 @@ type CustomerSurface struct {
 	// by backend API prefix match (for controller/service files).
 	// Empty slice means no match; nil means MFARegistry was not provided.
 	MFAApps []MFAAppRef
+
+	// SemanticProducts classifies the file by what the code DOES (class names,
+	// decorators, imports) rather than where it lives (file path). Populated for
+	// any TypeScript file with non-empty source. Nil when source is empty.
+	SemanticProducts []SemanticProduct
+
+	// EventChainImpacts lists downstream customer impacts from pub/sub topics
+	// published by this file. Derived from ExtractPublisherStepTopics +
+	// TopicRegistry lookup. Nil when TopicRegistry is not provided.
+	EventChainImpacts []TopicImpact
+
+	// RouteCallers lists which frontend repos and MFA apps call the backend
+	// routes exposed by this file. Derived from NestJS controller prefix +
+	// routes + RouteCallersRegistry. Nil when RouteCallersRegistry is not provided.
+	RouteCallers []RouteCallersResult
+
+	// InternalCallImpacts lists downstream service-to-service call impacts
+	// (e.g. this service calls OFFERS_SERVICE → offers team is impacted).
+	InternalCallImpacts []InternalCallImpact
+
+	// DTOConsumers lists repos that import the DTO classes defined in this file.
+	DTOConsumers []DTOConsumerResult
+
+	// MongoReaders lists repos/files that query the same MongoDB collections.
+	MongoReaders []MongoReaderResult
+
+	// ConsumerCascade describes downstream side effects if this file is a
+	// consumer worker (emails, drips, webhooks, access grants).
+	ConsumerCascade []ConsumerCascadeResult
+
+	// ImpactReport is the final structured customer-impact summary aggregating
+	// all signals. Rendered by downstream tooling.
+	ImpactReport CustomerImpactReport
 }
 
 // BuildCustomerSurface fuses product-area lookup, Vue extraction, FE
@@ -149,7 +194,218 @@ func BuildCustomerSurface(args BuildCustomerSurfaceArgs) (CustomerSurface, error
 		cs.MFAApps = resolveMFAApps(args.Repo, args.FilePath, cs.NestJSRoutes, cs.FetchCalls, args.MFARegistry)
 	}
 
+	// 8. Semantic product classification — classifies by code semantics, not
+	// file path. This catches files like community-checkout.controller.ts that
+	// live under apps/courses/ but serve Communities, not Courses.
+	if isTypeScriptFile(args.FilePath) && strings.TrimSpace(args.Source) != "" {
+		cs.SemanticProducts = ClassifySemanticProducts(args.Source, args.FilePath)
+	}
+
+	// 9. Event-chain impact — resolves pub/sub topics published via
+	// new PublisherStep(...) to downstream product areas + MFA app keys.
+	if args.TopicRegistry != nil && isTypeScriptFile(args.FilePath) && strings.TrimSpace(args.Source) != "" {
+		// Augment literal-string events with PublisherStep enum references.
+		publisherTopics := ExtractPublisherStepTopics(args.Source)
+		var allEvents []EventPatternCall
+		allEvents = append(allEvents, cs.EventPatterns...)
+		for _, tp := range publisherTopics {
+			allEvents = append(allEvents, EventPatternCall{
+				Topic:    tp,
+				Role:     "producer",
+				Symbol:   "",
+				FilePath: args.FilePath,
+			})
+		}
+		cs.EventChainImpacts = ResolveEventChainImpact(allEvents, args.TopicRegistry)
+	}
+
+	// 10. Route callers — which frontend repos/MFA apps call the NestJS routes
+	// exposed by this controller. Uses controller prefix derived from the file
+	// path and the extracted NestJS routes.
+	if args.RouteCallersRegistry != nil && isControllerFile(args.FilePath) && len(cs.NestJSRoutes) > 0 {
+		controllerPrefix := extractControllerPrefix(args.FilePath)
+		cs.RouteCallers = ResolveRouteCallers(controllerPrefix, cs.NestJSRoutes, args.RouteCallersRegistry)
+	}
+
+	// 11. Org-wide dynamic enrichment — supplements static registries with
+	// live code search across all indexed repos. Results are merged with the
+	// static findings.
+	if args.OrgEnricher != nil && args.Ctx != nil {
+		// Dynamic route-callers discovery (for controller files).
+		if isControllerFile(args.FilePath) && len(cs.NestJSRoutes) > 0 {
+			prefix := "/" + strings.Trim(extractControllerPrefix(args.FilePath), "/") + "/"
+			if dyn, err := args.OrgEnricher.DiscoverRouteCallers(args.Ctx, prefix); err == nil && dyn != nil {
+				cs.RouteCallers = mergeRouteCallers(cs.RouteCallers, dyn)
+			}
+		}
+		// Dynamic topic-impact discovery.
+		if isTypeScriptFile(args.FilePath) && strings.TrimSpace(args.Source) != "" {
+			topics := ExtractPublisherStepTopics(args.Source)
+			for _, ev := range cs.EventPatterns {
+				if ev.Role == "producer" {
+					topics = append(topics, ev.Topic)
+				}
+			}
+			if len(topics) > 0 {
+				if dyn, err := args.OrgEnricher.DiscoverTopicImpact(args.Ctx, topics); err == nil && dyn != nil {
+					cs.EventChainImpacts = mergeTopicImpacts(cs.EventChainImpacts, dyn)
+				}
+			}
+		}
+	}
+
+	// 12. InternalRequest chain tracing — what downstream services does this call.
+	if args.OrgEnricher != nil && args.Ctx != nil && isTypeScriptFile(args.FilePath) && strings.TrimSpace(args.Source) != "" {
+		if internalCalls, err := ExtractInternalRequests(args.Source); err == nil && len(internalCalls) > 0 {
+			searcher := &orgSearcherAdapter{org: args.OrgEnricher}
+			cs.InternalCallImpacts, _ = TraceInternalCallImpact(args.Ctx, internalCalls, args.MFARegistry, searcher)
+		}
+	}
+
+	// 13. DTO consumer tracing — which repos import DTOs defined here.
+	if args.OrgEnricher != nil && args.Ctx != nil && len(cs.DTOClasses) > 0 {
+		searcher := &orgDTOAdapter{org: args.OrgEnricher}
+		cs.DTOConsumers, _ = TraceDTOConsumers(args.Ctx, cs.DTOClasses, args.MFARegistry, searcher)
+	}
+
+	// 14. Mongo reader tracing — which repos read the same MongoDB collections.
+	if args.OrgEnricher != nil && args.Ctx != nil && isTypeScriptFile(args.FilePath) && strings.TrimSpace(args.Source) != "" {
+		models := ExtractMongoModels(args.Source, args.FilePath)
+		if len(models) > 0 {
+			searcher := &orgMongoAdapter{org: args.OrgEnricher}
+			cs.MongoReaders, _ = TraceMongoReaders(args.Ctx, models, args.Repo, args.MFARegistry, searcher)
+		}
+	}
+
+	// 15. Consumer cascade — downstream side effects if this file is a consumer.
+	if isTypeScriptFile(args.FilePath) && strings.TrimSpace(args.Source) != "" && len(cs.EventPatterns) > 0 {
+		cs.ConsumerCascade = ResolveConsumerCascade(cs.EventPatterns, args.Source, args.TopicRegistry)
+	}
+
+	// 16. Aggregate all signals into a structured ImpactReport.
+	cs.ImpactReport = BuildImpactReport(cs)
+
 	return cs, nil
+}
+
+// orgSearcherAdapter adapts *OrgEnricher's underlying searcher to the narrower
+// tracer-specific search interfaces. This keeps each tracer decoupled from the
+// full OrgSearcher interface.
+type orgSearcherAdapter struct {
+	org *OrgEnricher
+}
+
+func (a *orgSearcherAdapter) SearchAll(ctx context.Context, pattern, fileGlob string) ([]CallSearchHit, error) {
+	hits, err := a.org.searcher.SearchAll(ctx, pattern, fileGlob)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]CallSearchHit, len(hits))
+	for i, h := range hits {
+		out[i] = CallSearchHit{Repo: h.Repo, FilePath: h.FilePath, Line: h.Line, Text: h.Text}
+	}
+	return out, nil
+}
+
+// Duplicate SearchAll method signatures with different return types require
+// separate adapter types because Go interfaces can't overload.
+type orgDTOAdapter struct{ org *OrgEnricher }
+
+func (a *orgDTOAdapter) SearchAll(ctx context.Context, pattern, fileGlob string) ([]DTOSearchHit, error) {
+	hits, err := a.org.searcher.SearchAll(ctx, pattern, fileGlob)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]DTOSearchHit, len(hits))
+	for i, h := range hits {
+		out[i] = DTOSearchHit{Repo: h.Repo, FilePath: h.FilePath, Line: h.Line, Text: h.Text}
+	}
+	return out, nil
+}
+
+type orgMongoAdapter struct{ org *OrgEnricher }
+
+func (a *orgMongoAdapter) SearchAll(ctx context.Context, pattern, fileGlob string) ([]MongoSearchHit, error) {
+	hits, err := a.org.searcher.SearchAll(ctx, pattern, fileGlob)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]MongoSearchHit, len(hits))
+	for i, h := range hits {
+		out[i] = MongoSearchHit{Repo: h.Repo, FilePath: h.FilePath, Line: h.Line, Text: h.Text}
+	}
+	return out, nil
+}
+
+// mergeRouteCallers merges static-YAML results with dynamic-search results,
+// deduplicating by (PathPrefix, Repo).
+func mergeRouteCallers(staticR, dynamic []RouteCallersResult) []RouteCallersResult {
+	seen := make(map[string]bool)
+	var out []RouteCallersResult
+	for _, group := range [][]RouteCallersResult{staticR, dynamic} {
+		for _, r := range group {
+			key := r.PathPrefix
+			if seen[key] {
+				// Merge callers into existing entry.
+				for i := range out {
+					if out[i].PathPrefix == key {
+						out[i].Callers = mergeCallerEntries(out[i].Callers, r.Callers)
+						break
+					}
+				}
+				continue
+			}
+			seen[key] = true
+			out = append(out, r)
+		}
+	}
+	return out
+}
+
+func mergeCallerEntries(a, b []RouteCallerEntry) []RouteCallerEntry {
+	seen := make(map[string]bool)
+	for _, e := range a {
+		seen[e.Repo] = true
+	}
+	for _, e := range b {
+		if !seen[e.Repo] {
+			seen[e.Repo] = true
+			a = append(a, e)
+		}
+	}
+	return a
+}
+
+func mergeTopicImpacts(staticI, dynamic []TopicImpact) []TopicImpact {
+	seen := make(map[string]bool)
+	var out []TopicImpact
+	for _, t := range staticI {
+		key := t.TopicID + "|" + t.SubscriberRepo
+		seen[key] = true
+		out = append(out, t)
+	}
+	for _, t := range dynamic {
+		key := t.TopicID + "|" + t.SubscriberRepo
+		if !seen[key] {
+			seen[key] = true
+			out = append(out, t)
+		}
+	}
+	return out
+}
+
+// extractControllerPrefix derives the NestJS controller path prefix from a
+// controller file path. It uses the filename stem (without .controller.ts).
+// For example: "apps/courses/src/community-checkout/community-checkout.controller.ts"
+// → "community-checkout". The @Controller decorator value may differ from the
+// file name, but in GHL the convention is consistent and this serves as a fast
+// heuristic for route-callers registry lookup.
+func extractControllerPrefix(filePath string) string {
+	parts := strings.Split(filePath, "/")
+	name := parts[len(parts)-1]
+	name = strings.TrimSuffix(name, ".controller.ts")
+	name = strings.TrimSuffix(name, ".controller.js")
+	return name
 }
 
 // resolveMFAApps builds the MFAAppRef slice for a given file by combining two

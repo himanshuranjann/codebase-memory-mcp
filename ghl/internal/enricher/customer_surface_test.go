@@ -367,3 +367,143 @@ func TestCustomerSurface_EmptySourceYieldsMinimalRecord(t *testing.T) {
 		t.Errorf("ComponentName = %q, want empty", surface.ComponentName)
 	}
 }
+
+// ---------------------------------------------------------------------------
+// Integration: PR #10133 — community-checkout.controller.ts surfaces
+// Communities as customer impact via all three new signal layers.
+// ---------------------------------------------------------------------------
+
+const communityCheckoutControllerSource = `
+import { Controller, Post, Body } from '@nestjs/common';
+import { CommunityCheckoutService } from './community-checkout.service';
+import { CommunityCheckoutDto } from './dto/community-checkout.dto';
+
+@Controller('community-checkout')
+export class CommunityCheckoutController {
+  constructor(private readonly service: CommunityCheckoutService) {}
+
+  @Post('checkout')
+  async checkout(@Body() dto: CommunityCheckoutDto) {
+    return this.service.checkout(dto);
+  }
+}
+`
+
+func TestBuildCustomerSurface_PR10133_SemanticProducts(t *testing.T) {
+	pm := &ProductMap{}
+	surface, err := BuildCustomerSurface(BuildCustomerSurfaceArgs{
+		Repo:     "ghl-revex-backend",
+		FilePath: "apps/courses/src/community-checkout/community-checkout.controller.ts",
+		Source:   communityCheckoutControllerSource,
+		ProductMap: pm,
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(surface.SemanticProducts) == 0 {
+		t.Fatal("expected SemanticProducts, got none")
+	}
+	found := false
+	for _, sp := range surface.SemanticProducts {
+		if sp.Domain == "Communities — Checkout" {
+			found = true
+		}
+	}
+	if !found {
+		domains := make([]string, 0, len(surface.SemanticProducts))
+		for _, sp := range surface.SemanticProducts {
+			domains = append(domains, sp.Domain)
+		}
+		t.Errorf("expected 'Communities — Checkout' in SemanticProducts, got %v", domains)
+	}
+}
+
+func TestBuildCustomerSurface_PR10133_RouteCallers(t *testing.T) {
+	reg, err := LoadDefaultRouteCallersRegistry()
+	if err != nil {
+		t.Fatalf("LoadDefaultRouteCallersRegistry: %v", err)
+	}
+	pm := &ProductMap{}
+	surface, err := BuildCustomerSurface(BuildCustomerSurfaceArgs{
+		Repo:                 "ghl-revex-backend",
+		FilePath:             "apps/courses/src/community-checkout/community-checkout.controller.ts",
+		Source:               communityCheckoutControllerSource,
+		ProductMap:           pm,
+		RouteCallersRegistry: reg,
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	// Controller has @Post('checkout') — combined with prefix "community-checkout"
+	// → /community-checkout/checkout → must find callers from route_callers.yaml
+	if len(surface.RouteCallers) == 0 {
+		t.Fatal("expected RouteCallers, got none")
+	}
+	mfaKeys := make(map[string]bool)
+	for _, rc := range surface.RouteCallers {
+		for _, caller := range rc.Callers {
+			for _, k := range caller.MFAAppKeys {
+				mfaKeys[k] = true
+			}
+		}
+	}
+	if !mfaKeys["communitiesApp"] {
+		t.Errorf("expected communitiesApp in RouteCallers MFA keys, got %v", mfaKeys)
+	}
+	if !mfaKeys["membership-courses-portal"] {
+		t.Errorf("expected membership-courses-portal in RouteCallers MFA keys, got %v", mfaKeys)
+	}
+}
+
+const communityCheckoutOrchestratorSource = `
+import { PublisherStep } from '@platform/pubsub';
+import { CheckoutOrchestrationWorkerEvent } from './events';
+
+export const COMMUNITY_CHECKOUT_STEPS = [
+  new PublisherStep(
+    CheckoutStepsName.CHECKOUT_PUBLISH_TO_INTEGRATIONS,
+    CheckoutOrchestratorConfig.TOPICS.CHECKOUT_INTEGRATIONS,
+    CheckoutOrchestrationWorkerEvent.CHECKOUT_ORCHESTRATION_INTEGRATIONS,
+  ),
+];
+`
+
+func TestBuildCustomerSurface_PR10133_EventChainImpacts(t *testing.T) {
+	topicReg, err := LoadDefaultTopicRegistry()
+	if err != nil {
+		t.Fatalf("LoadDefaultTopicRegistry: %v", err)
+	}
+	pm := &ProductMap{}
+	surface, err := BuildCustomerSurface(BuildCustomerSurfaceArgs{
+		Repo:          "ghl-revex-backend",
+		FilePath:      "apps/courses/src/checkout-process/config/community-checkout-orchestrator.config.ts",
+		Source:        communityCheckoutOrchestratorSource,
+		ProductMap:    pm,
+		TopicRegistry: topicReg,
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(surface.EventChainImpacts) == 0 {
+		t.Fatal("expected EventChainImpacts for PublisherStep topics, got none")
+	}
+	products := make(map[string]bool)
+	mfaKeys := make(map[string]bool)
+	for _, imp := range surface.EventChainImpacts {
+		for _, pa := range imp.ProductAreas {
+			products[pa.Product] = true
+		}
+		for _, k := range imp.MFAAppKeys {
+			mfaKeys[k] = true
+		}
+	}
+	if !products["Memberships — Checkout Flow"] {
+		t.Errorf("expected Memberships — Checkout Flow in EventChainImpacts, got %v", products)
+	}
+	if !products["Communities — Checkout Flow"] {
+		t.Errorf("expected Communities — Checkout Flow in EventChainImpacts, got %v", products)
+	}
+	if !mfaKeys["communities-member-portal"] {
+		t.Errorf("expected communities-member-portal in EventChainImpacts, got %v", mfaKeys)
+	}
+}

@@ -1,0 +1,171 @@
+callers:
+  # ──────────────────────────────────────────────────────────────────────────
+  # Community checkout — communities offer purchase flow
+  # ──────────────────────────────────────────────────────────────────────────
+  - path_prefix: "/community-checkout/"
+    description: "Community checkout orchestration API"
+    callers:
+      - repo: "ghl-revex-frontend"
+        mfa_app_keys: ["communitiesApp"]
+        call_patterns: ["POST /community-checkout/checkout"]
+        notes: "Communities frontend triggers checkout for community offers"
+      - repo: "ghl-membership-frontend"
+        mfa_app_keys: ["membership-courses-portal"]
+        call_patterns: ["POST /community-checkout/checkout"]
+        notes: "Membership portal handles community offer checkout flows"
+
+  # ──────────────────────────────────────────────────────────────────────────
+  # Communities — group and member management
+  # ──────────────────────────────────────────────────────────────────────────
+  - path_prefix: "/communities/"
+    description: "Communities group and member APIs"
+    callers:
+      - repo: "ghl-revex-frontend"
+        mfa_app_keys: ["communitiesApp", "communities-member-portal"]
+        call_patterns:
+          - "GET /communities/groups/:groupId"
+          - "POST /communities/groups"
+          - "GET /communities/groups/:groupId/members"
+          - "POST /communities/groups/:groupId/join"
+          - "POST /communities/posts"
+          - "GET /communities/posts/:postId"
+        notes: "Communities admin and member portal"
+
+  # ──────────────────────────────────────────────────────────────────────────
+  # Membership — offer management and member portal
+  # ──────────────────────────────────────────────────────────────────────────
+  - path_prefix: "/membership/"
+    description: "Membership management APIs"
+    callers:
+      - repo: "ghl-membership-frontend"
+        mfa_app_keys: ["membershipApp", "membership-courses-portal"]
+        call_patterns:
+          - "GET /membership/offers"
+          - "GET /membership/offers/:offerId"
+          - "POST /membership/offers"
+          - "PUT /membership/offers/:offerId"
+          - "GET /membership/members"
+          - "POST /membership/members"
+        notes: "Primary membership SPA"
+      - repo: "ghl-revex-frontend"
+        mfa_app_keys: ["communitiesApp"]
+        call_patterns:
+          - "GET /membership/offers"
+          - "GET /membership/offers/:offerId"
+        notes: "Communities app reads membership offers for community offer checkout"
+
+  # ──────────────────────────────────────────────────────────────────────────
+  # Courses — learner and instructor flows
+  # ──────────────────────────────────────────────────────────────────────────
+  - path_prefix: "/courses/"
+    description: "Courses learner and instructor APIs"
+    callers:
+      - repo: "ghl-membership-frontend"
+        mfa_app_keys: ["membership-courses-portal"]
+        call_patterns:
+          - "GET /courses"
+          - "GET /courses/:courseId"
+          - "GET /courses/:courseId/lessons"
+          - "POST /courses/:courseId/lessons/:lessonId/complete"
+          - "GET /courses/:courseId/progress"
+        notes: "Membership-courses portal — primary consumer for learner-facing course flows"
+      - repo: "ghl-courses-frontend"
+        mfa_app_keys: ["coursesApp"]
+        call_patterns:
+          - "GET /courses"
+          - "GET /courses/:courseId"
+          - "POST /courses"
+          - "PUT /courses/:courseId"
+          - "DELETE /courses/:courseId"
+          - "GET /courses/:courseId/lessons"
+          - "POST /courses/:courseId/lessons"
+        notes: "Courses admin SPA — instructor/creator flows"
+
+  # ──────────────────────────────────────────────────────────────────────────
+  # Offers (membership checkout) — purchase and access
+  # ──────────────────────────────────────────────────────────────────────────
+  - path_prefix: "/offers/"
+    description: "Offer purchase and access-grant APIs"
+    callers:
+      - repo: "ghl-membership-frontend"
+        mfa_app_keys: ["membershipApp", "membership-courses-portal"]
+        call_patterns:
+          - "POST /offers/checkout"
+          - "GET /offers/:offerId"
+          - "GET /offers/:offerId/access"
+        notes: "Membership checkout and access checking"
+      - repo: "ghl-revex-frontend"
+        mfa_app_keys: ["communitiesApp"]
+        call_patterns:
+          - "GET /offers/:offerId"
+        notes: "Communities app previews offer before community checkout"
+
+  # ──────────────────────────────────────────────────────────────────────────
+  # GoKollab — collaborative workspace
+  # ──────────────────────────────────────────────────────────────────────────
+  - path_prefix: "/gokollab/"
+    description: "GoKollab workspace APIs"
+    callers:
+      - repo: "ghl-gokollab-frontend"
+        mfa_app_keys: ["goKollabApp", "gokollab-workspace"]
+        call_patterns:
+          - "GET /gokollab/workspaces"
+          - "POST /gokollab/workspaces"
+          - "GET /gokollab/workspaces/:workspaceId"
+          - "GET /gokollab/workspaces/:workspaceId/members"
+        notes: "GoKollab SPA — primary consumer"
+
+  # ──────────────────────────────────────────────────────────────────────────
+  # Client portal
+  # ──────────────────────────────────────────────────────────────────────────
+  - path_prefix: "/client-portal/"
+    description: "Client portal APIs"
+    callers:
+      - repo: "ghl-client-portal-frontend"
+        mfa_app_keys: ["client-portal"]
+        call_patterns:
+          - "GET /client-portal/me"
+          - "GET /client-portal/invoices"
+          - "GET /client-portal/appointments"
+        notes: "Client portal SSR/SPA — all client-facing routes"
+
+  # ──────────────────────────────────────────────────────────────────────────
+  # Checkout orchestration (shared orchestrator entry point)
+  # ──────────────────────────────────────────────────────────────────────────
+  - path_prefix: "/checkout/"
+    description: "Generic checkout orchestrator entry point"
+    callers:
+      - repo: "ghl-membership-frontend"
+        mfa_app_keys: ["membershipApp", "membership-courses-portal"]
+        call_patterns:
+          - "POST /checkout/initiate"
+          - "POST /checkout/validate"
+          - "GET /checkout/status/:checkoutId"
+        notes: "Membership SPA initiates generic checkout flows"
+      - repo: "ghl-revex-frontend"
+        mfa_app_keys: ["communitiesApp"]
+        call_patterns:
+          - "POST /checkout/initiate"
+          - "GET /checkout/status/:checkoutId"
+        notes: "Communities app uses generic checkout for offer purchases"
+
+  # ──────────────────────────────────────────────────────────────────────────
+  # Members portal — unified member access
+  # ──────────────────────────────────────────────────────────────────────────
+  - path_prefix: "/members/"
+    description: "Member management and access APIs"
+    callers:
+      - repo: "ghl-membership-frontend"
+        mfa_app_keys: ["membershipApp", "membership-courses-portal"]
+        call_patterns:
+          - "GET /members/:memberId"
+          - "GET /members/:memberId/products"
+          - "GET /members/:memberId/courses"
+          - "POST /members/:memberId/grant-access"
+        notes: "Membership portal checks member access and products"
+      - repo: "ghl-revex-frontend"
+        mfa_app_keys: ["communities-member-portal"]
+        call_patterns:
+          - "GET /members/:memberId"
+          - "GET /members/:memberId/communities"
+        notes: "Communities member portal checks membership for gating community access"
