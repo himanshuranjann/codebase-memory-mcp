@@ -35,6 +35,10 @@ type CustomerSurfaceArgs struct {
 	// ProductMapPath is an optional filesystem override of the embedded product map.
 	// When empty (the default), the binary-embedded YAML is used.
 	ProductMapPath string `json:"product_map_path,omitempty"`
+	// MFARegistryPath is an optional filesystem override of the embedded MFA registry.
+	// When empty (the default), the binary-embedded mfa_registry.yaml is used.
+	// Pass a path only in local dev / test scenarios.
+	MFARegistryPath string `json:"mfa_registry_path,omitempty"`
 }
 
 // CustomerSurfaceFile is one file in a customer-surface batch request.
@@ -52,9 +56,9 @@ type CustomerSurfaceResult struct {
 	Surfaces []enricher.CustomerSurface  `json:"surfaces"`
 }
 
-// HandleCustomerSurface fuses product-area, Vue metadata, and FE fetch-call
-// extraction across a batch of files. Pure compute — the only I/O is the
-// optional product-map override load path.
+// HandleCustomerSurface fuses product-area, Vue metadata, FE fetch-call
+// extraction, NestJS route metadata, DTO contract fields, and MFA app
+// association across a batch of files.
 func HandleCustomerSurface(ctx context.Context, args CustomerSurfaceArgs) (*CustomerSurfaceResult, error) {
 	if args.Repo == "" {
 		return nil, errors.New("customer-surface: repo is required")
@@ -63,6 +67,11 @@ func HandleCustomerSurface(ctx context.Context, args CustomerSurfaceArgs) (*Cust
 	pm, err := loadProductMap(args.ProductMapPath)
 	if err != nil {
 		return nil, fmt.Errorf("customer-surface: load product map: %w", err)
+	}
+
+	mfaReg, err := loadMFARegistry(args.MFARegistryPath)
+	if err != nil {
+		return nil, fmt.Errorf("customer-surface: load mfa registry: %w", err)
 	}
 
 	out := &CustomerSurfaceResult{
@@ -77,10 +86,11 @@ func HandleCustomerSurface(ctx context.Context, args CustomerSurfaceArgs) (*Cust
 			return nil, err
 		}
 		cs, err := enricher.BuildCustomerSurface(enricher.BuildCustomerSurfaceArgs{
-			Repo:       args.Repo,
-			FilePath:   f.Path,
-			Source:     f.Source,
-			ProductMap: pm,
+			Repo:        args.Repo,
+			FilePath:    f.Path,
+			Source:      f.Source,
+			ProductMap:  pm,
+			MFARegistry: mfaReg,
 		})
 		if err != nil {
 			// Enricher currently never returns an error; if it ever does in the
@@ -96,10 +106,17 @@ func HandleCustomerSurface(ctx context.Context, args CustomerSurfaceArgs) (*Cust
 }
 
 // loadProductMap returns the embedded default unless an override path is set.
-// Keeps HandleCustomerSurface itself uncluttered by the load-path branching.
 func loadProductMap(overridePath string) (*enricher.ProductMap, error) {
 	if overridePath != "" {
 		return enricher.LoadProductMap(overridePath)
 	}
 	return enricher.LoadDefaultProductMap()
+}
+
+// loadMFARegistry returns the embedded default unless an override path is set.
+func loadMFARegistry(overridePath string) (*enricher.MFARegistry, error) {
+	if overridePath != "" {
+		return enricher.LoadMFARegistry(overridePath)
+	}
+	return enricher.LoadDefaultMFARegistry()
 }
