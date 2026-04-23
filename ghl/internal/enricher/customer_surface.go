@@ -124,6 +124,17 @@ type CustomerSurface struct {
 	// consumer worker (emails, drips, webhooks, access grants).
 	ConsumerCascade []ConsumerCascadeResult
 
+	// EnumDefinitions are enum-like declarations defined in this file.
+	// Covers TypeScript `enum`, class-static objects, and const-object-as-const
+	// patterns. Enables cross-repo enum reference tracking that CBM's FTS5
+	// index doesn't natively support (dot-notation references tokenize apart).
+	EnumDefinitions []EnumDefinition
+
+	// EnumReferences are dot-chain references like
+	// `CheckoutOrchestratorConfig.TOPICS.CHECKOUT_INTEGRATIONS` used in this
+	// file. One entry per source line.
+	EnumReferences []EnumReference
+
 	// ImpactReport is the final structured customer-impact summary aggregating
 	// all signals. Rendered by downstream tooling.
 	ImpactReport CustomerImpactReport
@@ -280,6 +291,14 @@ func BuildCustomerSurface(args BuildCustomerSurfaceArgs) (CustomerSurface, error
 	// 15. Consumer cascade — downstream side effects if this file is a consumer.
 	if isTypeScriptFile(args.FilePath) && strings.TrimSpace(args.Source) != "" && len(cs.EventPatterns) > 0 {
 		cs.ConsumerCascade = ResolveConsumerCascade(cs.EventPatterns, args.Source, args.TopicRegistry)
+	}
+
+	// 15a. Enum tracking — definitions + dot-chain references. Closes the
+	// CBM FTS5 gap where `CheckoutOrchestratorConfig.TOPICS.CHECKOUT_INTEGRATIONS`
+	// isn't searchable as CHECKOUT_INTEGRATIONS.
+	if isTypeScriptFile(args.FilePath) && strings.TrimSpace(args.Source) != "" {
+		cs.EnumDefinitions = ExtractEnumDefinitions(args.Source, args.FilePath)
+		cs.EnumReferences = ExtractEnumReferences(args.Source, args.FilePath)
 	}
 
 	// 16. Aggregate all signals into a structured ImpactReport.
