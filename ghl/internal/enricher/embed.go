@@ -14,6 +14,13 @@ import (
 //go:embed data/product_map.yaml
 var defaultProductMapYAML []byte
 
+// defaultMFARegistryYAML ships with the binary alongside product_map.yaml.
+// Maps all GHL frontend apps (SPMT MFAs, standalone user-facing apps, SSR
+// apps) to their CDN URLs, route prefixes, and backend API prefixes.
+//
+//go:embed data/mfa_registry.yaml
+var defaultMFARegistryYAML []byte
+
 // LoadDefaultProductMap returns the product map embedded into the binary at
 // build time. Parsed once per process — callers should treat the returned
 // pointer as read-only. Returns a descriptive error only if the embedded YAML
@@ -24,4 +31,16 @@ func LoadDefaultProductMap() (*ProductMap, error) {
 		return nil, fmt.Errorf("enricher: parse embedded product_map.yaml: %w", err)
 	}
 	return &pm, nil
+}
+
+// LoadDefaultMFARegistry returns the MFA registry embedded into the binary at
+// build time. Returns a descriptive error only if the embedded YAML is
+// malformed (a build-time bug). Callers should treat the returned pointer as
+// read-only.
+func LoadDefaultMFARegistry() (*MFARegistry, error) {
+	r, err := parseMFARegistry(defaultMFARegistryYAML)
+	if err != nil {
+		return nil, fmt.Errorf("enricher: parse embedded mfa_registry.yaml: %w", err)
+	}
+	return r, nil
 }

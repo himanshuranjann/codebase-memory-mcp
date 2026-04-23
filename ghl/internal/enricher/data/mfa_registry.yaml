@@ -1,0 +1,1702 @@
+# mfa_registry.yaml — hand-maintained registry of all GHL frontend apps.
+#
+# Three kinds of app surface:
+#   spmt       — Agency/account admin apps loaded via Module Federation inside
+#                app.gohighlevel.com (the SPMT shell). End-user = agency owner
+#                or sub-account admin. federation_key matches the TypeScript key
+#                in spm-ts/src/config/runtimeRemoteApps.ts or async-remoteApps.ts.
+#   standalone — Independently deployed user-facing frontends. Prospects, contacts,
+#                students, clients — not agency admins — hit these URLs directly.
+#   ssr        — Nuxt 3 SSR apps deployed to per-client custom domains (RevEx
+#                membership, communities, client portal).
+#
+# Maintenance:
+#   - Add an entry when a new MFA app ships or a new user-facing app launches.
+#   - Update backend_api_prefixes when a standalone/ssr app starts calling a new service.
+#   - route_prefixes for SPMT apps come from spm-ts/src/routes/ — keep in sync.
+#   - Missing coverage returns an empty []MFAAppRef — callers surface the gap explicitly.
+#
+# Reviewed quarterly alongside product_map.yaml.
+# Schema: see MFAAppEntry in mfa_registry.go.
+
+apps:
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # SPMT — CRM Team (20 apps)
+  # ─────────────────────────────────────────────────────────────────────────────
+
+  - kind: spmt
+    key: conversationsApp
+    display_name: Conversations
+    github_repo: ghl-crm-frontend
+    app_dir: apps/conversations
+    federation_key: conversationsApp
+    cdn_slug: crm/conversations-components
+    cdn_url_prod: https://appcdn.leadconnectorhq.com/crm/conversations-components/remoteEntry.js
+    route_prefixes:
+      - /v2/location/:locationId/conversations
+    level: location
+    product_area: "CRM — Conversations"
+    owner: "@crm-conversations"
+    user_type: agency-admin
+
+  - kind: spmt
+    key: conversationsV2App
+    display_name: Conversations V2
+    github_repo: ghl-crm-frontend
+    app_dir: apps/conversations-v2
+    federation_key: conversationsV2App
+    cdn_slug: crm/conversations-new-ui
+    cdn_url_prod: https://appcdn.leadconnectorhq.com/crm/conversations-new-ui/remoteEntry.js
+    route_prefixes:
+      - /v2/location/:locationId/conversations/v2
+    level: location
+    product_area: "CRM — Conversations"
+    owner: "@crm-conversations"
+    user_type: agency-admin
+
+  - kind: spmt
+    key: conversationsUtilitiesApp
+    display_name: Conversations Utilities
+    github_repo: ghl-crm-frontend
+    app_dir: apps/conversations-utilities
+    federation_key: conversationsUtilitiesApp
+    cdn_slug: crm/conversations-utilities
+    cdn_url_prod: https://appcdn.leadconnectorhq.com/crm/conversations-utilities/remoteEntry.js
+    route_prefixes:
+      - /v2/location/:locationId/conversations
+    level: location
+    product_area: "CRM — Conversations"
+    owner: "@crm-conversations"
+    user_type: agency-admin
+
+  - kind: spmt
+    key: contactsApp
+    display_name: Contacts
+    github_repo: ghl-crm-frontend
+    app_dir: apps/contacts
+    federation_key: contactsApp
+    cdn_slug: crm/contacts
+    cdn_url_prod: https://appcdn.leadconnectorhq.com/crm/contacts/remoteEntry.js
+    route_prefixes:
+      - /v2/location/:locationId/contacts
+    level: location
+    product_area: "CRM — Contacts"
+    owner: "@crm-contacts"
+    user_type: agency-admin
+
+  - kind: spmt
+    key: contactsHighriseApp
+    display_name: Contacts Highrise
+    github_repo: ghl-crm-frontend
+    app_dir: apps/contacts-highrise
+    federation_key: contactsHighriseApp
+    cdn_slug: crm/contacts-highrise
+    cdn_url_prod: https://appcdn.leadconnectorhq.com/crm/contacts-highrise/remoteEntry.js
+    route_prefixes:
+      - /v2/location/:locationId/contacts
+    level: location
+    product_area: "CRM — Contacts"
+    owner: "@crm-contacts"
+    user_type: agency-admin
+
+  - kind: spmt
+    key: ghlContactRestoreApp
+    display_name: Contact Restore
+    github_repo: ghl-crm-frontend
+    app_dir: apps/contacts-restore
+    federation_key: ghlContactRestoreApp
+    cdn_slug: crm/contacts-restore
+    cdn_url_prod: https://appcdn.leadconnectorhq.com/crm/contacts-restore/remoteEntry.js
+    route_prefixes:
+      - /v2/location/:locationId/contacts/restore
+    level: location
+    product_area: "CRM — Contacts"
+    owner: "@crm-contacts"
+    user_type: agency-admin
+
+  - kind: spmt
+    key: customObjectsApp
+    display_name: Custom Objects
+    github_repo: ghl-crm-frontend
+    app_dir: apps/custom-objects
+    federation_key: customObjectsApp
+    cdn_slug: crm/custom-objects
+    cdn_url_prod: https://appcdn.leadconnectorhq.com/crm/custom-objects/remoteEntry.js
+    route_prefixes:
+      - /v2/location/:locationId/custom-objects
+    level: location
+    product_area: "CRM — Custom Objects"
+    owner: "@crm-custom-objects"
+    user_type: agency-admin
+
+  - kind: spmt
+    key: crmObjectsSettingsApp
+    display_name: CRM Objects Settings
+    github_repo: ghl-crm-frontend
+    app_dir: apps/crm-objects-settings
+    federation_key: crmObjectsSettingsApp
+    cdn_slug: crm/crm-objects-settings
+    cdn_url_prod: https://appcdn.leadconnectorhq.com/crm/crm-objects-settings/remoteEntry.js
+    route_prefixes:
+      - /v2/location/:locationId/settings/custom-objects
+    level: location
+    product_area: "CRM — Custom Objects"
+    owner: "@crm-custom-objects"
+    user_type: agency-admin
+
+  - kind: spmt
+    key: usersApp
+    display_name: Users & Permissions
+    github_repo: ghl-crm-frontend
+    app_dir: apps/users
+    federation_key: usersApp
+    cdn_slug: crm/users
+    cdn_url_prod: https://appcdn.leadconnectorhq.com/crm/users/remoteEntry.js
+    route_prefixes:
+      - /v2/location/:locationId/settings/team
+      - /v2/location/:locationId/settings/users
+    level: location
+    product_area: "CRM — Team & Permissions"
+    owner: "@crm-users"
+    user_type: agency-admin
+
+  - kind: spmt
+    key: documentsApp
+    display_name: Documents & Contracts
+    github_repo: ghl-crm-frontend
+    app_dir: apps/documents
+    federation_key: documentsApp
+    cdn_slug: crm/documents
+    cdn_url_prod: https://appcdn.leadconnectorhq.com/crm/documents/remoteEntry.js
+    route_prefixes:
+      - /v2/location/:locationId/documents
+    level: location
+    product_area: "CRM — Documents & Contracts"
+    owner: "@crm-documents"
+    user_type: agency-admin
+
+  - kind: spmt
+    key: customFieldsApp
+    display_name: Custom Fields
+    github_repo: ghl-crm-frontend
+    app_dir: apps/custom-fields
+    federation_key: customFieldsApp
+    cdn_slug: crm/custom-fields
+    cdn_url_prod: https://appcdn.leadconnectorhq.com/crm/custom-fields/remoteEntry.js
+    route_prefixes:
+      - /v2/location/:locationId/settings/custom-fields
+    level: location
+    product_area: "CRM — Custom Fields"
+    owner: "@crm-custom-fields"
+    user_type: agency-admin
+
+  - kind: spmt
+    key: integrationsApp
+    display_name: Integrations
+    github_repo: ghl-crm-frontend
+    app_dir: apps/integrations
+    federation_key: integrationsApp
+    cdn_slug: crm/integrations
+    cdn_url_prod: https://appcdn.leadconnectorhq.com/crm/integrations/remoteEntry.js
+    route_prefixes:
+      - /v2/location/:locationId/settings/integrations
+    level: location
+    product_area: "CRM — Integrations"
+    owner: "@crm-integrations"
+    user_type: agency-admin
+
+  - kind: spmt
+    key: authApp
+    display_name: Auth
+    github_repo: ghl-crm-frontend
+    app_dir: apps/auth
+    federation_key: authApp
+    cdn_slug: crm/auth
+    cdn_url_prod: https://appcdn.leadconnectorhq.com/crm/auth/remoteEntry.js
+    route_prefixes:
+      - /v2/login
+      - /v2/signup
+    level: location
+    product_area: "Platform — Auth"
+    owner: "@platform-auth"
+    user_type: agency-admin
+
+  - kind: spmt
+    key: labsApp
+    display_name: Labs
+    github_repo: ghl-crm-frontend
+    app_dir: apps/labs
+    federation_key: labsApp
+    cdn_slug: crm/labs
+    cdn_url_prod: https://appcdn.leadconnectorhq.com/crm/labs/remoteEntry.js
+    route_prefixes:
+      - /v2/location/:locationId/labs
+    level: location
+    product_area: "CRM — Labs"
+    owner: "@crm-labs"
+    user_type: agency-admin
+
+  - kind: spmt
+    key: contentAIApp
+    display_name: Content AI
+    github_repo: ghl-crm-frontend
+    app_dir: apps/content-ai
+    federation_key: contentAIApp
+    cdn_slug: crm/content-ai
+    cdn_url_prod: https://appcdn.leadconnectorhq.com/crm/content-ai/remoteEntry.js
+    route_prefixes:
+      - /v2/location/:locationId/content-ai
+    level: location
+    product_area: "AI — Content AI"
+    owner: "@ai-content"
+    user_type: agency-admin
+
+  - kind: spmt
+    key: preferenceManagementApp
+    display_name: Preference Management
+    github_repo: ghl-crm-frontend
+    app_dir: apps/preference-management
+    federation_key: preferenceManagementApp
+    cdn_slug: crm/preference-management
+    cdn_url_prod: https://appcdn.leadconnectorhq.com/crm/preference-management/remoteEntry.js
+    route_prefixes:
+      - /v2/location/:locationId/settings/preferences
+    level: location
+    product_area: "CRM — Preferences"
+    owner: "@crm-settings"
+    user_type: agency-admin
+
+  - kind: spmt
+    key: voiceAiApp
+    display_name: Voice AI
+    github_repo: ghl-crm-frontend
+    app_dir: apps/voice-ai
+    federation_key: voiceAiApp
+    cdn_slug: crm/voice-ai
+    cdn_url_prod: https://appcdn.leadconnectorhq.com/crm/voice-ai/remoteEntry.js
+    route_prefixes:
+      - /v2/location/:locationId/voice-ai
+    level: location
+    product_area: "Calling — Voice AI"
+    owner: "@crm-voice"
+    user_type: agency-admin
+
+  - kind: spmt
+    key: bulkActionsApp
+    display_name: Bulk Actions
+    github_repo: ghl-crm-frontend
+    app_dir: apps/bulk-actions
+    federation_key: bulkActionsApp
+    cdn_slug: crm/bulk-actions
+    cdn_url_prod: https://appcdn.leadconnectorhq.com/crm/bulk-actions/remoteEntry.js
+    route_prefixes:
+      - /v2/location/:locationId/bulk-actions
+    level: location
+    product_area: "CRM — Bulk Actions"
+    owner: "@crm-contacts"
+    user_type: agency-admin
+
+  - kind: spmt
+    key: aiEmployeesApp
+    display_name: AI Employees
+    github_repo: ghl-crm-frontend
+    app_dir: apps/ai-employees
+    federation_key: aiEmployeesApp
+    cdn_slug: crm/ai-employees
+    cdn_url_prod: https://appcdn.leadconnectorhq.com/crm/ai-employees/remoteEntry.js
+    route_prefixes:
+      - /v2/location/:locationId/ai-employees
+    level: location
+    product_area: "AI — AI Employees"
+    owner: "@ai-agents"
+    user_type: agency-admin
+
+  - kind: spmt
+    key: marketplaceApp
+    display_name: Marketplace
+    github_repo: ghl-crm-frontend
+    app_dir: apps/marketplace
+    federation_key: marketplaceApp
+    cdn_slug: crm/marketplace
+    cdn_url_prod: https://appcdn.leadconnectorhq.com/crm/marketplace/remoteEntry.js
+    route_prefixes:
+      - /v2/location/:locationId/marketplace
+      - /v2/agency/:companyId/marketplace
+    level: location
+    product_area: "Marketplace"
+    owner: "@crm-marketplace"
+    user_type: agency-admin
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # SPMT — AI Team (7 apps)
+  # ─────────────────────────────────────────────────────────────────────────────
+
+  - kind: spmt
+    key: knowledgeBaseApp
+    display_name: Knowledge Base
+    github_repo: ai-frontend
+    app_dir: apps/knowledge-base
+    federation_key: knowledgeBaseApp
+    cdn_slug: ai/knowledge-base
+    cdn_url_prod: https://appcdn.leadconnectorhq.com/ai/knowledge-base/remoteEntry.js
+    route_prefixes:
+      - /v2/location/:locationId/ai/knowledge-base
+      - /v2/location/:locationId/knowledge-base
+    level: location
+    product_area: "AI — Knowledge Base"
+    owner: "@ai-knowledge"
+    user_type: agency-admin
+
+  - kind: spmt
+    key: copilotApp
+    display_name: AI Copilot
+    github_repo: ai-frontend
+    app_dir: apps/copilot
+    federation_key: copilotApp
+    cdn_slug: ai/copilot
+    cdn_url_prod: https://appcdn.leadconnectorhq.com/ai/copilot/remoteEntry.js
+    route_prefixes:
+      - /v2/location/:locationId/ai/copilot
+    level: location
+    product_area: "AI — Copilot"
+    owner: "@ai-copilot"
+    user_type: agency-admin
+
+  - kind: spmt
+    key: agentStudioApp
+    display_name: Agent Studio
+    github_repo: ai-frontend
+    app_dir: apps/agent-studio
+    federation_key: agentStudioApp
+    cdn_slug: ai/agent-studio
+    cdn_url_prod: https://appcdn.leadconnectorhq.com/ai/agent-studio/remoteEntry.js
+    route_prefixes:
+      - /v2/location/:locationId/ai/agent-studio
+    level: location
+    product_area: "AI — Agent Studio"
+    owner: "@ai-agents"
+    user_type: agency-admin
+
+  - kind: spmt
+    key: agentLogsApp
+    display_name: Agent Logs
+    github_repo: ai-frontend
+    app_dir: apps/agent-logs
+    federation_key: agentLogsApp
+    cdn_slug: ai/agent-logs
+    cdn_url_prod: https://appcdn.leadconnectorhq.com/ai/agent-logs/remoteEntry.js
+    route_prefixes:
+      - /v2/location/:locationId/ai/agent-logs
+    level: location
+    product_area: "AI — Agent Studio"
+    owner: "@ai-agents"
+    user_type: agency-admin
+
+  - kind: spmt
+    key: performanceAiApp
+    display_name: Performance AI
+    github_repo: ai-frontend
+    app_dir: apps/performance-ai
+    federation_key: performanceAiApp
+    cdn_slug: ai/performance-ai
+    cdn_url_prod: https://appcdn.leadconnectorhq.com/ai/performance-ai/remoteEntry.js
+    route_prefixes:
+      - /v2/location/:locationId/ai/performance
+    level: location
+    product_area: "AI — Performance AI"
+    owner: "@ai-performance"
+    user_type: agency-admin
+
+  - kind: spmt
+    key: actionsPlatformApp
+    display_name: Actions Platform
+    github_repo: ai-frontend
+    app_dir: apps/actions-platform
+    federation_key: actionsPlatformApp
+    cdn_slug: ai/actions-platform
+    cdn_url_prod: https://appcdn.leadconnectorhq.com/ai/actions-platform/remoteEntry.js
+    route_prefixes:
+      - /v2/location/:locationId/ai/actions
+    level: location
+    product_area: "AI — Actions Platform"
+    owner: "@ai-actions"
+    user_type: agency-admin
+
+  - kind: spmt
+    key: aiGrowthApp
+    display_name: AI Growth
+    github_repo: ai-frontend
+    app_dir: apps/ai-growth
+    federation_key: aiGrowthApp
+    cdn_slug: ai/ai-growth
+    cdn_url_prod: https://appcdn.leadconnectorhq.com/ai/ai-growth/remoteEntry.js
+    route_prefixes:
+      - /v2/location/:locationId/ai/growth
+    level: location
+    product_area: "AI — Growth"
+    owner: "@ai-growth"
+    user_type: agency-admin
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # SPMT — Leadgen Team (25 apps)
+  # ─────────────────────────────────────────────────────────────────────────────
+
+  - kind: spmt
+    key: funnelWebsiteApp
+    display_name: Funnel / Website Builder (Admin)
+    github_repo: ghl-crm-frontend
+    app_dir: apps/funnel-website
+    federation_key: funnelWebsiteApp
+    cdn_slug: leadgen/funnel-website
+    cdn_url_prod: https://appcdn.leadconnectorhq.com/leadgen/funnel-website/remoteEntry.js
+    route_prefixes:
+      - /v2/location/:locationId/funnels
+      - /v2/location/:locationId/websites
+    level: location
+    product_area: "Funnels & Websites — Builder"
+    owner: "@leadgen-funnels"
+    user_type: agency-admin
+
+  - kind: spmt
+    key: funnelWebsiteAnalytics
+    display_name: Funnel Analytics
+    github_repo: ghl-crm-frontend
+    app_dir: apps/funnel-website-analytics
+    federation_key: funnelWebsiteAnalytics
+    cdn_slug: leadgen/funnel-website-analytics
+    cdn_url_prod: https://appcdn.leadconnectorhq.com/leadgen/funnel-website-analytics/remoteEntry.js
+    route_prefixes:
+      - /v2/location/:locationId/funnels/:funnelId/analytics
+    level: location
+    product_area: "Funnels & Websites — Analytics"
+    owner: "@leadgen-funnels"
+    user_type: agency-admin
+
+  - kind: spmt
+    key: redirectApp
+    display_name: Funnel Redirect Manager
+    github_repo: ghl-crm-frontend
+    app_dir: apps/funnel-website-redirect
+    federation_key: redirectApp
+    cdn_slug: leadgen/funnel-website-redirect
+    cdn_url_prod: https://appcdn.leadconnectorhq.com/leadgen/funnel-website-redirect/remoteEntry.js
+    route_prefixes:
+      - /v2/location/:locationId/funnels/redirects
+    level: location
+    product_area: "Funnels & Websites — Redirects"
+    owner: "@leadgen-funnels"
+    user_type: agency-admin
+
+  - kind: spmt
+    key: domainConnectApp
+    display_name: Domain Connect
+    github_repo: ghl-crm-frontend
+    app_dir: apps/funnel-website-domain-connect
+    federation_key: domainConnectApp
+    cdn_slug: leadgen/funnel-website-domain-connect
+    cdn_url_prod: https://appcdn.leadconnectorhq.com/leadgen/funnel-website-domain-connect/remoteEntry.js
+    route_prefixes:
+      - /v2/location/:locationId/settings/domains
+    level: location
+    product_area: "Funnels & Websites — Domains"
+    owner: "@leadgen-funnels"
+    user_type: agency-admin
+
+  - kind: spmt
+    key: formSurveyApp
+    display_name: Forms & Surveys (Builder)
+    github_repo: ghl-crm-frontend
+    app_dir: apps/form-survey
+    federation_key: formSurveyApp
+    cdn_slug: leadgen/form-survey
+    cdn_url_prod: https://appcdn.leadconnectorhq.com/leadgen/form-survey/remoteEntry.js
+    route_prefixes:
+      - /v2/location/:locationId/survey-builder
+      - /v2/location/:locationId/form-builder
+    level: location
+    product_area: "Forms & Surveys"
+    owner: "@leadgen-forms"
+    user_type: agency-admin
+
+  - kind: spmt
+    key: socialPlannerApp
+    display_name: Social Planner
+    github_repo: ghl-crm-frontend
+    app_dir: apps/social-planner
+    federation_key: socialPlannerApp
+    cdn_slug: leadgen/SocialPlanner
+    cdn_url_prod: https://appcdn.leadconnectorhq.com/leadgen/SocialPlanner/remoteEntry.js
+    route_prefixes:
+      - /v2/location/:locationId/social-planner
+    level: location
+    product_area: "Marketing — Social Planner"
+    owner: "@leadgen-social"
+    user_type: agency-admin
+
+  - kind: spmt
+    key: templateLibraryApp
+    display_name: Template Library
+    github_repo: ghl-crm-frontend
+    app_dir: apps/template-library
+    federation_key: templateLibraryApp
+    cdn_slug: leadgen/template-library
+    cdn_url_prod: https://appcdn.leadconnectorhq.com/leadgen/template-library/remoteEntry.js
+    route_prefixes:
+      - /v2/location/:locationId/template-library
+    level: location
+    product_area: "Marketing — Templates"
+    owner: "@leadgen-templates"
+    user_type: agency-admin
+
+  - kind: spmt
+    key: mediaCenterApp
+    display_name: Media Center
+    github_repo: ghl-crm-frontend
+    app_dir: apps/media-center
+    federation_key: mediaCenterApp
+    cdn_slug: leadgen/media-center
+    cdn_url_prod: https://appcdn.leadconnectorhq.com/leadgen/media-center/remoteEntry.js
+    route_prefixes:
+      - /v2/location/:locationId/media-center
+    level: location
+    product_area: "Marketing — Media Center"
+    owner: "@leadgen-media"
+    user_type: agency-admin
+
+  - kind: spmt
+    key: mediaEditorApp
+    display_name: Media Editor
+    github_repo: ghl-crm-frontend
+    app_dir: apps/media-editor
+    federation_key: mediaEditorApp
+    cdn_slug: leadgen/MediaEditor
+    cdn_url_prod: https://appcdn.leadconnectorhq.com/leadgen/MediaEditor/remoteEntry.js
+    route_prefixes:
+      - /v2/location/:locationId/media-center/editor
+    level: location
+    product_area: "Marketing — Media Editor"
+    owner: "@leadgen-media"
+    user_type: agency-admin
+
+  - kind: spmt
+    key: brandBoardsApp
+    display_name: Brand Boards
+    github_repo: ghl-crm-frontend
+    app_dir: apps/brand-boards
+    federation_key: brandBoardsApp
+    cdn_slug: leadgen/brand-boards
+    cdn_url_prod: https://appcdn.leadconnectorhq.com/leadgen/brand-boards/remoteEntry.js
+    route_prefixes:
+      - /v2/location/:locationId/brand-boards
+    level: location
+    product_area: "Marketing — Brand Boards"
+    owner: "@leadgen-branding"
+    user_type: agency-admin
+
+  - kind: spmt
+    key: chatWidgetApp
+    display_name: Chat Widget (Admin Config)
+    github_repo: ghl-crm-frontend
+    app_dir: apps/chat-widget
+    federation_key: chatWidgetApp
+    cdn_slug: leadgen/chat-widget
+    cdn_url_prod: https://appcdn.leadconnectorhq.com/leadgen/chat-widget/remoteEntry.js
+    route_prefixes:
+      - /v2/location/:locationId/settings/chat-widget
+    level: location
+    product_area: "Conversations — Chat Widget"
+    owner: "@crm-conversations"
+    user_type: agency-admin
+
+  - kind: spmt
+    key: adPublishingApp
+    display_name: Ad Publishing
+    github_repo: ghl-crm-frontend
+    app_dir: apps/ad-publishing
+    federation_key: adPublishingApp
+    cdn_slug: leadgen-ad-publishing/ad-publishing
+    cdn_url_prod: https://appcdn.leadconnectorhq.com/leadgen-ad-publishing/ad-publishing/remoteEntry.js
+    route_prefixes:
+      - /v2/location/:locationId/advertising
+    level: location
+    product_area: "Marketing — Advertising"
+    owner: "@leadgen-ads"
+    user_type: agency-admin
+
+  - kind: spmt
+    key: seoApp
+    display_name: SEO
+    github_repo: ghl-crm-frontend
+    app_dir: apps/seo
+    federation_key: seoApp
+    cdn_slug: leadgen/seoApp
+    cdn_url_prod: https://appcdn.leadconnectorhq.com/leadgen/seoApp/remoteEntry.js
+    route_prefixes:
+      - /v2/location/:locationId/seo
+    level: location
+    product_area: "Marketing — SEO"
+    owner: "@leadgen-seo"
+    user_type: agency-admin
+
+  - kind: spmt
+    key: externalTrackingApp
+    display_name: External Tracking
+    github_repo: ghl-crm-frontend
+    app_dir: apps/external-tracking
+    federation_key: externalTrackingApp
+    cdn_slug: leadgen/external-tracking
+    cdn_url_prod: https://appcdn.leadconnectorhq.com/leadgen/external-tracking/remoteEntry.js
+    route_prefixes:
+      - /v2/location/:locationId/settings/tracking
+    level: location
+    product_area: "Marketing — Tracking"
+    owner: "@leadgen-tracking"
+    user_type: agency-admin
+
+  - kind: spmt
+    key: paymentsApp
+    display_name: Payments
+    github_repo: ghl-crm-frontend
+    app_dir: apps/payments
+    federation_key: paymentsApp
+    cdn_slug: leadgen/ghl-payments
+    cdn_url_prod: https://appcdn.leadconnectorhq.com/leadgen/ghl-payments/remoteEntry.js
+    route_prefixes:
+      - /v2/location/:locationId/payments
+    level: location
+    product_area: "Payments"
+    owner: "@leadgen-payments"
+    user_type: agency-admin
+
+  - kind: spmt
+    key: leadgenPaymentsApp
+    display_name: Payments Widgets
+    github_repo: ghl-crm-frontend
+    app_dir: apps/payments-widgets
+    federation_key: leadgenPaymentsApp
+    cdn_slug: leadgen/payments-widgets
+    cdn_url_prod: https://appcdn.leadconnectorhq.com/leadgen/payments-widgets/remoteEntry.js
+    route_prefixes:
+      - /v2/location/:locationId/payments/widgets
+    level: location
+    product_area: "Payments — Widgets"
+    owner: "@leadgen-payments"
+    user_type: agency-admin
+
+  - kind: spmt
+    key: giftCardsApp
+    display_name: Gift Cards
+    github_repo: ghl-crm-frontend
+    app_dir: apps/gift-cards
+    federation_key: giftCardsApp
+    cdn_slug: leadgen/gift-cards
+    cdn_url_prod: https://appcdn.leadconnectorhq.com/leadgen/gift-cards/remoteEntry.js
+    route_prefixes:
+      - /v2/location/:locationId/payments/gift-cards
+    level: location
+    product_area: "Payments — Gift Cards"
+    owner: "@leadgen-payments"
+    user_type: agency-admin
+
+  - kind: spmt
+    key: storeWidgetApp
+    display_name: Store Widgets
+    github_repo: ghl-crm-frontend
+    app_dir: apps/store-widgets
+    federation_key: storeWidgetApp
+    cdn_slug: leadgen/store-widgets
+    cdn_url_prod: https://appcdn.leadconnectorhq.com/leadgen/store-widgets/remoteEntry.js
+    route_prefixes:
+      - /v2/location/:locationId/payments/store
+    level: location
+    product_area: "E-commerce — Store"
+    owner: "@leadgen-ecommerce"
+    user_type: agency-admin
+
+  - kind: spmt
+    key: invoicesApp
+    display_name: Invoices
+    github_repo: ghl-crm-frontend
+    app_dir: apps/invoices
+    federation_key: invoicesApp
+    cdn_slug: leadgen/invoices
+    cdn_url_prod: https://appcdn.leadconnectorhq.com/leadgen/invoices/remoteEntry.js
+    route_prefixes:
+      - /v2/location/:locationId/payments/invoices
+    level: location
+    product_area: "Payments — Invoices"
+    owner: "@leadgen-payments"
+    user_type: agency-admin
+
+  - kind: spmt
+    key: estimatesApp
+    display_name: Estimates
+    github_repo: ghl-crm-frontend
+    app_dir: apps/estimates
+    federation_key: estimatesApp
+    cdn_slug: leadgen/estimates
+    cdn_url_prod: https://appcdn.leadconnectorhq.com/leadgen/estimates/remoteEntry.js
+    route_prefixes:
+      - /v2/location/:locationId/payments/estimates
+    level: location
+    product_area: "Payments — Estimates"
+    owner: "@leadgen-payments"
+    user_type: agency-admin
+
+  - kind: spmt
+    key: leadgenPaymentLinksApp
+    display_name: Payment Links
+    github_repo: ghl-crm-frontend
+    app_dir: apps/payment-links
+    federation_key: leadgenPaymentLinksApp
+    cdn_slug: leadgen/payment-links
+    cdn_url_prod: https://appcdn.leadconnectorhq.com/leadgen/payment-links/remoteEntry.js
+    route_prefixes:
+      - /v2/location/:locationId/payments/links
+    level: location
+    product_area: "Payments — Payment Links"
+    owner: "@leadgen-payments"
+    user_type: agency-admin
+
+  - kind: spmt
+    key: quizResultBuilderApp
+    display_name: Quiz Result Builder
+    github_repo: ghl-crm-frontend
+    app_dir: apps/quiz-result-builder
+    federation_key: quizResultBuilderApp
+    cdn_slug: leadgen/quiz-result-builder
+    cdn_url_prod: https://appcdn.leadconnectorhq.com/leadgen/quiz-result-builder/remoteEntry.js
+    route_prefixes:
+      - /v2/location/:locationId/quiz-builder
+    level: location
+    product_area: "Forms & Surveys — Quizzes"
+    owner: "@leadgen-forms"
+    user_type: agency-admin
+
+  - kind: spmt
+    key: qrCodeListApp
+    display_name: QR Code Manager
+    github_repo: ghl-crm-frontend
+    app_dir: apps/qr-code-list
+    federation_key: qrCodeListApp
+    cdn_slug: leadgen/qr-code-list
+    cdn_url_prod: https://appcdn.leadconnectorhq.com/leadgen/qr-code-list/remoteEntry.js
+    route_prefixes:
+      - /v2/location/:locationId/qr-codes
+    level: location
+    product_area: "Marketing — QR Codes"
+    owner: "@leadgen-marketing"
+    user_type: agency-admin
+
+  - kind: spmt
+    key: qrCodeBuilderApp
+    display_name: QR Code Builder
+    github_repo: ghl-crm-frontend
+    app_dir: apps/qr-code-builder
+    federation_key: qrCodeBuilderApp
+    cdn_slug: leadgen/qr-code-builder
+    cdn_url_prod: https://appcdn.leadconnectorhq.com/leadgen/qr-code-builder/remoteEntry.js
+    route_prefixes:
+      - /v2/location/:locationId/qr-codes/builder
+    level: location
+    product_area: "Marketing — QR Codes"
+    owner: "@leadgen-marketing"
+    user_type: agency-admin
+
+  - kind: spmt
+    key: countdownTimerApp
+    display_name: Countdown Timer
+    github_repo: ghl-crm-frontend
+    app_dir: apps/countdown-timer
+    federation_key: countdownTimerApp
+    cdn_slug: leadgen/countdown-timer
+    cdn_url_prod: https://appcdn.leadconnectorhq.com/leadgen/countdown-timer/remoteEntry.js
+    route_prefixes:
+      - /v2/location/:locationId/countdown-timer
+    level: location
+    product_area: "Marketing — Countdown Timers"
+    owner: "@leadgen-marketing"
+    user_type: agency-admin
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # SPMT — Revex Team (20 apps)
+  # ─────────────────────────────────────────────────────────────────────────────
+
+  - kind: spmt
+    key: reputationApp
+    display_name: Reputation Management
+    github_repo: ghl-revex-frontend
+    app_dir: apps/reputation
+    federation_key: reputationApp
+    cdn_slug: revex/reputation
+    cdn_url_prod: https://appcdn.leadconnectorhq.com/revex/reputation/remoteEntry.js
+    route_prefixes:
+      - /v2/location/:locationId/reputation
+    level: location
+    product_area: "Reputation Management"
+    owner: "@revex-reputation"
+    user_type: agency-admin
+
+  - kind: spmt
+    key: yextApp
+    display_name: Yext Listings
+    github_repo: ghl-revex-frontend
+    app_dir: apps/yext
+    federation_key: yextApp
+    cdn_slug: revex/yext
+    cdn_url_prod: https://appcdn.leadconnectorhq.com/revex/yext/remoteEntry.js
+    route_prefixes:
+      - /v2/location/:locationId/yext
+    level: location
+    product_area: "Reputation — Yext"
+    owner: "@revex-reputation"
+    user_type: agency-admin
+
+  - kind: spmt
+    key: membershipApp
+    display_name: Memberships (Admin Builder)
+    github_repo: ghl-revex-frontend
+    app_dir: apps/memberships
+    federation_key: membershipApp
+    cdn_slug: revex/memberships
+    cdn_url_prod: https://appcdn.leadconnectorhq.com/revex/memberships/remoteEntry.js
+    route_prefixes:
+      - /v2/location/:locationId/memberships
+    level: location
+    product_area: "Memberships & Courses"
+    owner: "@revex-membership"
+    user_type: agency-admin
+
+  - kind: spmt
+    key: membershipSettingsApp
+    display_name: Membership Settings
+    github_repo: ghl-revex-frontend
+    app_dir: apps/membership-settings
+    federation_key: membershipSettingsApp
+    cdn_slug: revex/membership-settings
+    cdn_url_prod: https://appcdn.leadconnectorhq.com/revex/membership-settings/remoteEntry.js
+    route_prefixes:
+      - /v2/location/:locationId/memberships/settings
+    level: location
+    product_area: "Memberships & Courses"
+    owner: "@revex-membership"
+    user_type: agency-admin
+
+  - kind: spmt
+    key: communitiesApp
+    display_name: Communities (Admin Builder)
+    github_repo: ghl-revex-frontend
+    app_dir: apps/communities-builder
+    federation_key: communitiesApp
+    cdn_slug: revex/communities-builder
+    cdn_url_prod: https://appcdn.leadconnectorhq.com/revex/communities-builder/remoteEntry.js
+    route_prefixes:
+      - /v2/location/:locationId/communities
+    level: location
+    product_area: "Communities"
+    owner: "@revex-communities"
+    user_type: agency-admin
+
+  - kind: spmt
+    key: goKollabApp
+    display_name: GoKollab (Admin)
+    github_repo: ghl-revex-frontend
+    app_dir: apps/gokollab-builder
+    federation_key: goKollabApp
+    cdn_slug: revex/gokollab-builder
+    cdn_url_prod: https://appcdn.leadconnectorhq.com/revex/gokollab-builder/remoteEntry.js
+    route_prefixes:
+      - /v2/location/:locationId/gokollab
+    level: location
+    product_area: "GoKollab"
+    owner: "@revex-gokollab"
+    user_type: agency-admin
+
+  - kind: spmt
+    key: clientPortalBuilder
+    display_name: Client Portal Builder
+    github_repo: ghl-revex-frontend
+    app_dir: apps/clientportal-builder
+    federation_key: clientPortalBuilder
+    cdn_slug: revex/clientportal-builder
+    cdn_url_prod: https://appcdn.leadconnectorhq.com/revex/clientportal-builder/remoteEntry.js
+    route_prefixes:
+      - /v2/location/:locationId/client-portal
+    level: location
+    product_area: "Client Portal"
+    owner: "@revex-clientportal"
+    user_type: agency-admin
+
+  - kind: spmt
+    key: certificatesApp
+    display_name: Certificates Builder
+    github_repo: ghl-revex-frontend
+    app_dir: apps/certificates-builder
+    federation_key: certificatesApp
+    cdn_slug: revex/certificates-builder
+    cdn_url_prod: https://appcdn.leadconnectorhq.com/revex/certificates-builder/remoteEntry.js
+    route_prefixes:
+      - /v2/location/:locationId/memberships/certificates
+    level: location
+    product_area: "Memberships — Certificates"
+    owner: "@revex-membership"
+    user_type: agency-admin
+
+  - kind: spmt
+    key: snapshotsApp
+    display_name: Snapshots
+    github_repo: ghl-revex-frontend
+    app_dir: apps/snapshots
+    federation_key: snapshotsApp
+    cdn_slug: revex/snapshots
+    cdn_url_prod: https://appcdn.leadconnectorhq.com/revex/snapshots/remoteEntry.js
+    route_prefixes:
+      - /v2/agency/:companyId/snapshots
+      - /v2/location/:locationId/settings/snapshots
+    level: agency
+    product_area: "Agency — Snapshots"
+    owner: "@revex-agency"
+    user_type: agency-admin
+
+  - kind: spmt
+    key: affiliateDashboardApp
+    display_name: Affiliate Portal (Admin)
+    github_repo: ghl-revex-frontend
+    app_dir: apps/affiliate-portal
+    federation_key: affiliateDashboardApp
+    cdn_slug: revex/affiliate-portal
+    cdn_url_prod: https://appcdn.leadconnectorhq.com/revex/affiliate-portal/remoteEntry.js
+    route_prefixes:
+      - /v2/location/:locationId/affiliate-manager
+    level: location
+    product_area: "Affiliate Management"
+    owner: "@revex-affiliate"
+    user_type: agency-admin
+
+  - kind: spmt
+    key: agencyDashboardApp
+    display_name: Agency Dashboard
+    github_repo: ghl-revex-frontend
+    app_dir: apps/agency-dashboard
+    federation_key: agencyDashboardApp
+    cdn_slug: revex/agency-dashboard
+    cdn_url_prod: https://appcdn.leadconnectorhq.com/revex/agency-dashboard/remoteEntry.js
+    route_prefixes:
+      - /v2/agency/:companyId/dashboard
+    level: agency
+    product_area: "Agency — Dashboard"
+    owner: "@revex-agency"
+    user_type: agency-admin
+
+  - kind: spmt
+    key: saasApp
+    display_name: SaaS Mode
+    github_repo: ghl-revex-frontend
+    app_dir: apps/saas
+    federation_key: saasApp
+    cdn_slug: revex/saas
+    cdn_url_prod: https://appcdn.leadconnectorhq.com/revex/saas/remoteEntry.js
+    route_prefixes:
+      - /v2/agency/:companyId/saas
+    level: agency
+    product_area: "Agency — SaaS Mode"
+    owner: "@revex-saas"
+    user_type: agency-admin
+
+  - kind: spmt
+    key: locationBillingApp
+    display_name: Location Billing
+    github_repo: ghl-revex-frontend
+    app_dir: apps/location-billing
+    federation_key: locationBillingApp
+    cdn_slug: revex/location-billing
+    cdn_url_prod: https://appcdn.leadconnectorhq.com/revex/location-billing/remoteEntry.js
+    route_prefixes:
+      - /v2/location/:locationId/settings/billing
+    level: location
+    product_area: "Billing — Location"
+    owner: "@revex-billing"
+    user_type: agency-admin
+
+  - kind: spmt
+    key: platformBillingApp
+    display_name: Platform Billing
+    github_repo: ghl-revex-frontend
+    app_dir: apps/platform-billing
+    federation_key: platformBillingApp
+    cdn_slug: revex/platform-billing
+    cdn_url_prod: https://appcdn.leadconnectorhq.com/revex/platform-billing/remoteEntry.js
+    route_prefixes:
+      - /v2/agency/:companyId/billing
+    level: agency
+    product_area: "Billing — Agency"
+    owner: "@revex-billing"
+    user_type: agency-admin
+
+  - kind: spmt
+    key: companyApp
+    display_name: Company Settings
+    github_repo: ghl-revex-frontend
+    app_dir: apps/company
+    federation_key: companyApp
+    cdn_slug: revex/company
+    cdn_url_prod: https://appcdn.leadconnectorhq.com/revex/company/remoteEntry.js
+    route_prefixes:
+      - /v2/agency/:companyId/settings
+    level: agency
+    product_area: "Agency — Company Settings"
+    owner: "@revex-agency"
+    user_type: agency-admin
+
+  - kind: spmt
+    key: locationsApp
+    display_name: Locations Manager
+    github_repo: ghl-revex-frontend
+    app_dir: apps/locations
+    federation_key: locationsApp
+    cdn_slug: revex/locations
+    cdn_url_prod: https://appcdn.leadconnectorhq.com/revex/locations/remoteEntry.js
+    route_prefixes:
+      - /v2/agency/:companyId/locations
+    level: agency
+    product_area: "Agency — Locations"
+    owner: "@revex-agency"
+    user_type: agency-admin
+
+  - kind: spmt
+    key: phoneIntegrationApp
+    display_name: Phone Integration
+    github_repo: ghl-revex-frontend
+    app_dir: apps/phone-integration
+    federation_key: phoneIntegrationApp
+    cdn_slug: revex/phone-integration
+    cdn_url_prod: https://appcdn.leadconnectorhq.com/revex/phone-integration/remoteEntry.js
+    route_prefixes:
+      - /v2/location/:locationId/settings/phone-numbers
+    level: location
+    product_area: "Calling — Phone Integration"
+    owner: "@revex-phone"
+    user_type: agency-admin
+
+  - kind: spmt
+    key: locationSettingApp
+    display_name: Location Settings
+    github_repo: ghl-revex-frontend
+    app_dir: apps/location-setting
+    federation_key: locationSettingApp
+    cdn_slug: revex/LocationSetting
+    cdn_url_prod: https://appcdn.leadconnectorhq.com/revex/LocationSetting/remoteEntry.js
+    route_prefixes:
+      - /v2/location/:locationId/settings
+    level: location
+    product_area: "Settings — Location"
+    owner: "@revex-settings"
+    user_type: agency-admin
+
+  - kind: spmt
+    key: desktopCustomizerApp
+    display_name: Desktop Customizer
+    github_repo: ghl-revex-frontend
+    app_dir: apps/desktop-customizer
+    federation_key: desktopCustomizerApp
+    cdn_slug: revex/desktop-customizer
+    cdn_url_prod: https://appcdn.leadconnectorhq.com/revex/desktop-customizer/remoteEntry.js
+    route_prefixes:
+      - /v2/agency/:companyId/settings/desktop
+    level: agency
+    product_area: "Agency — White Label Desktop"
+    owner: "@revex-whitelabel"
+    user_type: agency-admin
+
+  - kind: spmt
+    key: resellingApp
+    display_name: Reselling
+    github_repo: ghl-revex-frontend
+    app_dir: apps/reselling
+    federation_key: resellingApp
+    cdn_slug: revex/reselling
+    cdn_url_prod: https://appcdn.leadconnectorhq.com/revex/reselling/remoteEntry.js
+    route_prefixes:
+      - /v2/agency/:companyId/reselling
+    level: agency
+    product_area: "Agency — Reselling"
+    owner: "@revex-agency"
+    user_type: agency-admin
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # SPMT — Automation Team (7 apps)
+  # ─────────────────────────────────────────────────────────────────────────────
+
+  - kind: spmt
+    key: reportingApp
+    display_name: Reporting & Analytics
+    github_repo: automation-workflows-frontend
+    app_dir: apps/reporting
+    federation_key: reportingApp
+    cdn_slug: automation-reporting/reporting
+    cdn_url_prod: https://appcdn.leadconnectorhq.com/automation-reporting/reporting/remoteEntry.js
+    route_prefixes:
+      - /v2/location/:locationId/reporting
+    level: location
+    product_area: "Reporting & Analytics"
+    owner: "@automation-reporting"
+    user_type: agency-admin
+
+  - kind: spmt
+    key: notificationApp
+    display_name: Notifications
+    github_repo: automation-workflows-frontend
+    app_dir: apps/notification
+    federation_key: notificationApp
+    cdn_slug: automation-reporting/notification
+    cdn_url_prod: https://appcdn.leadconnectorhq.com/automation-reporting/notification/remoteEntry.js
+    route_prefixes:
+      - /v2/location/:locationId/notifications
+    level: location
+    product_area: "Automation — Notifications"
+    owner: "@automation-reporting"
+    user_type: agency-admin
+
+  - kind: spmt
+    key: calendarSettingsApp
+    display_name: Calendar Settings
+    github_repo: automation-calendars-frontend-monorepo
+    app_dir: apps/calendar-settings
+    federation_key: calendarSettingsApp
+    cdn_slug: automation/calendar-settings
+    cdn_url_prod: https://appcdn.leadconnectorhq.com/automation/calendar-settings/remoteEntry.js
+    route_prefixes:
+      - /v2/location/:locationId/settings/calendars
+    level: location
+    product_area: "Calendar & Scheduling — Settings"
+    owner: "@automation-calendar"
+    user_type: agency-admin
+
+  - kind: spmt
+    key: calendarServicesApp
+    display_name: Calendar Services
+    github_repo: automation-calendars-frontend-monorepo
+    app_dir: apps/calendar-services
+    federation_key: calendarServicesApp
+    cdn_slug: automation/calendar-services
+    cdn_url_prod: https://appcdn.leadconnectorhq.com/automation/calendar-services/remoteEntry.js
+    route_prefixes:
+      - /v2/location/:locationId/calendars
+    level: location
+    product_area: "Calendar & Scheduling"
+    owner: "@automation-calendar"
+    user_type: agency-admin
+
+  - kind: spmt
+    key: calendarRentalsApp
+    display_name: Calendar Rentals
+    github_repo: automation-calendars-frontend-monorepo
+    app_dir: apps/calendar-rentals
+    federation_key: calendarRentalsApp
+    cdn_slug: automation/calendar-rentals
+    cdn_url_prod: https://appcdn.leadconnectorhq.com/automation/calendar-rentals/remoteEntry.js
+    route_prefixes:
+      - /v2/location/:locationId/calendars/rentals
+    level: location
+    product_area: "Calendar — Rentals"
+    owner: "@automation-calendar"
+    user_type: agency-admin
+
+  - kind: spmt
+    key: appointmentModalApp
+    display_name: Appointment Modal
+    github_repo: automation-calendars-frontend-monorepo
+    app_dir: apps/appointment-modal
+    federation_key: appointmentModalApp
+    cdn_slug: automation/appointment-modal
+    cdn_url_prod: https://appcdn.leadconnectorhq.com/automation/appointment-modal/remoteEntry.js
+    route_prefixes:
+      - /v2/location/:locationId/calendars
+    level: location
+    product_area: "Calendar & Scheduling"
+    owner: "@automation-calendar"
+    user_type: agency-admin
+
+  - kind: spmt
+    key: featureDiscoveryApp
+    display_name: Feature Discovery
+    github_repo: automation-workflows-frontend
+    app_dir: apps/feature-discovery
+    federation_key: featureDiscoveryApp
+    cdn_slug: automation/feature-discovery
+    cdn_url_prod: https://appcdn.leadconnectorhq.com/automation/feature-discovery/remoteEntry.js
+    route_prefixes:
+      - /v2/location/:locationId/feature-discovery
+    level: location
+    product_area: "Platform — Feature Discovery"
+    owner: "@automation-platform"
+    user_type: agency-admin
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # SPMT — Miscellaneous (remaining apps)
+  # ─────────────────────────────────────────────────────────────────────────────
+
+  - kind: spmt
+    key: productsApp
+    display_name: Products Catalog
+    github_repo: ghl-crm-frontend
+    app_dir: apps/products
+    federation_key: productsApp
+    cdn_slug: leadgen/products
+    cdn_url_prod: https://appcdn.leadconnectorhq.com/leadgen/products/remoteEntry.js
+    route_prefixes:
+      - /v2/location/:locationId/payments/products
+    level: location
+    product_area: "E-commerce — Products"
+    owner: "@leadgen-ecommerce"
+    user_type: agency-admin
+
+  - kind: spmt
+    key: ecommerceApp
+    display_name: E-commerce Store Builder
+    github_repo: ghl-crm-frontend
+    app_dir: apps/ecommerce
+    federation_key: ecommerceApp
+    cdn_slug: leadgen/ecommerce
+    cdn_url_prod: https://appcdn.leadconnectorhq.com/leadgen/ecommerce/remoteEntry.js
+    route_prefixes:
+      - /v2/location/:locationId/payments/store/builder
+    level: location
+    product_area: "E-commerce — Store Builder"
+    owner: "@leadgen-ecommerce"
+    user_type: agency-admin
+
+  - kind: spmt
+    key: invoicesIntegrationsApp
+    display_name: Invoices Integrations
+    github_repo: ghl-crm-frontend
+    app_dir: apps/invoices-integrations
+    federation_key: invoicesIntegrationsApp
+    cdn_slug: leadgen/invoices-integrations
+    cdn_url_prod: https://appcdn.leadconnectorhq.com/leadgen/invoices-integrations/remoteEntry.js
+    route_prefixes:
+      - /v2/location/:locationId/payments/invoices/integrations
+    level: location
+    product_area: "Payments — Invoices"
+    owner: "@leadgen-payments"
+    user_type: agency-admin
+
+  - kind: spmt
+    key: defaultEmailTemplatesApp
+    display_name: Default Email Templates
+    github_repo: ghl-email-builder
+    app_dir: apps/default-emails
+    federation_key: defaultEmailTemplatesApp
+    cdn_slug: leadgen/default-emails
+    cdn_url_prod: https://appcdn.leadconnectorhq.com/leadgen/default-emails/remoteEntry.js
+    route_prefixes:
+      - /v2/location/:locationId/settings/email-templates
+    level: location
+    product_area: "Email Marketing — Templates"
+    owner: "@leadgen-email"
+    user_type: agency-admin
+
+  - kind: spmt
+    key: emailPreviewApp
+    display_name: Email Preview
+    github_repo: ghl-email-builder
+    app_dir: apps/email-preview
+    federation_key: emailPreviewApp
+    cdn_slug: leadgen/email-preview
+    cdn_url_prod: https://appcdn.leadconnectorhq.com/leadgen/email-preview/remoteEntry.js
+    route_prefixes:
+      - /v2/location/:locationId/email-preview
+    level: location
+    product_area: "Email Marketing — Preview"
+    owner: "@leadgen-email"
+    user_type: agency-admin
+
+  - kind: spmt
+    key: onboardingApp
+    display_name: Onboarding
+    github_repo: ghl-crm-frontend
+    app_dir: apps/onboarding
+    federation_key: onboardingApp
+    cdn_slug: leadgen/Onboarding
+    cdn_url_prod: https://appcdn.leadconnectorhq.com/leadgen/Onboarding/remoteEntry.js
+    route_prefixes:
+      - /v2/onboarding
+    level: location
+    product_area: "Platform — Onboarding"
+    owner: "@platform-onboarding"
+    user_type: agency-admin
+
+  - kind: spmt
+    key: launchpadApp
+    display_name: Launchpad
+    github_repo: ghl-crm-frontend
+    app_dir: apps/launchpad
+    federation_key: launchpadApp
+    cdn_slug: leadgen/Launchpad
+    cdn_url_prod: https://appcdn.leadconnectorhq.com/leadgen/Launchpad/remoteEntry.js
+    route_prefixes:
+      - /v2/location/:locationId/launchpad
+    level: location
+    product_area: "Platform — Launchpad"
+    owner: "@platform-launchpad"
+    user_type: agency-admin
+
+  - kind: spmt
+    key: domainResellingApp
+    display_name: Domain Reselling
+    github_repo: ghl-revex-frontend
+    app_dir: apps/domain-reselling
+    federation_key: domainResellingApp
+    cdn_slug: leadgen/domain-reselling
+    cdn_url_prod: https://appcdn.leadconnectorhq.com/leadgen/domain-reselling/remoteEntry.js
+    route_prefixes:
+      - /v2/location/:locationId/settings/domain-reselling
+    level: location
+    product_area: "Agency — Domain Reselling"
+    owner: "@revex-agency"
+    user_type: agency-admin
+
+  - kind: spmt
+    key: wordpressApp
+    display_name: WordPress Integration
+    github_repo: ghl-revex-frontend
+    app_dir: apps/wordpress
+    federation_key: wordpressApp
+    cdn_slug: revex/wordpress
+    cdn_url_prod: https://appcdn.leadconnectorhq.com/revex/wordpress/remoteEntry.js
+    route_prefixes:
+      - /v2/location/:locationId/wordpress
+    level: location
+    product_area: "Websites — WordPress"
+    owner: "@leadgen-websites"
+    user_type: agency-admin
+
+  - kind: spmt
+    key: agencyInternalToolsApp
+    display_name: Agency Internal Tools
+    github_repo: ghl-revex-frontend
+    app_dir: apps/agency-internaltools
+    federation_key: agencyInternalToolsApp
+    cdn_slug: revex/agency-internaltools
+    cdn_url_prod: https://appcdn.leadconnectorhq.com/revex/agency-internaltools/remoteEntry.js
+    route_prefixes:
+      - /v2/agency/:companyId/internal-tools
+    level: agency
+    product_area: "Agency — Internal Tools"
+    owner: "@revex-agency"
+    user_type: agency-admin
+
+  - kind: spmt
+    key: powerDialerApp
+    display_name: Power Dialer
+    github_repo: ghl-revex-frontend
+    app_dir: apps/power-dialer
+    federation_key: powerDialerApp
+    cdn_slug: revex/power-dialer
+    cdn_url_prod: https://appcdn.leadconnectorhq.com/revex/power-dialer/remoteEntry.js
+    route_prefixes:
+      - /v2/location/:locationId/power-dialer
+    level: location
+    product_area: "Calling — Power Dialer"
+    owner: "@revex-phone"
+    user_type: agency-admin
+
+  - kind: spmt
+    key: i18nFeedbackApp
+    display_name: i18n Feedback
+    github_repo: ghl-crm-frontend
+    app_dir: apps/i18n-feedback
+    federation_key: i18nFeedbackApp
+    cdn_slug: leadgen/i18n-feedback
+    cdn_url_prod: https://appcdn.leadconnectorhq.com/leadgen/i18n-feedback/remoteEntry.js
+    route_prefixes:
+      - /v2/i18n-feedback
+    level: location
+    product_area: "Platform — i18n"
+    owner: "@platform-i18n"
+    user_type: agency-admin
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # STANDALONE — User-facing apps deployed independently (NOT via SPMT)
+  # These are reached directly by prospects, contacts, students, clients.
+  # backend_api_prefixes drives the frontend→backend join in bidirectional tracing.
+  # ─────────────────────────────────────────────────────────────────────────────
+
+  - kind: standalone
+    key: funnel-website-renderer
+    display_name: Funnel / Landing Page (Public)
+    github_repo: ghl-funnel-website
+    deploy_target: cloud-run
+    url_pattern: "{customDomain} | *.myfunnels.com | *.leadpages.net | /funnel-preview/:id"
+    backend_api_prefixes:
+      - /funnels/
+      - /websites/
+      - /v1/locations/
+      - /v2/funnels/
+      - /contacts/
+      - /forms/
+    product_area: "Funnels & Websites — Public Renderer"
+    owner: "@leadgen-funnels"
+    user_type: prospect
+    deploy_notes: "Serves public funnel/landing pages to prospects. Custom domain or *.myfunnels.com."
+
+  - kind: standalone
+    key: calendar-booking-widget
+    display_name: Calendar Booking Page (Public)
+    github_repo: automation-calendars-frontend-monorepo
+    deploy_target: cdn-embed
+    url_pattern: "api.leadconnectorhq.com/widget/booking/:calendarId | msgsndr.com/widget/booking/:calendarId"
+    backend_api_prefixes:
+      - /calendars/
+      - /appointments/
+      - /v1/appointments/
+      - /v1/locations/:locationId/calendars
+    product_area: "Calendar & Scheduling — Public Booking"
+    owner: "@automation-calendar"
+    user_type: prospect
+    deploy_notes: "Public booking widget. Embedded via iframe or direct URL. Used by prospects to book appointments."
+
+  - kind: standalone
+    key: form-survey-embed
+    display_name: Form / Survey Embed (Public)
+    github_repo: ghl-form-embed
+    deploy_target: cdn-js-embed
+    url_pattern: "<script> embed on any website | /{locationId}/survey/:surveyId | /{locationId}/form/:formId"
+    backend_api_prefixes:
+      - /forms/
+      - /surveys/
+      - /v1/locations/:locationId/forms
+      - /v1/contacts/
+      - /contacts/
+    product_area: "Forms & Surveys — Public Embed"
+    owner: "@leadgen-forms"
+    user_type: prospect-contact
+    deploy_notes: "Single JS file embedded on customer websites. Also renders public form/survey pages directly."
+
+  - kind: standalone
+    key: chat-widget-embed
+    display_name: Chat Widget (Embedded on Websites)
+    github_repo: ghl-chat-widget
+    deploy_target: cdn-js-embed
+    url_pattern: "<script> embed on customer websites | chat bubble iframe"
+    backend_api_prefixes:
+      - /conversations/
+      - /contacts/
+      - /v1/locations/:locationId/conversations
+      - /v1/contacts/
+      - /v1/locations/:locationId/contacts
+    product_area: "Conversations — Chat Widget (Public)"
+    owner: "@crm-conversations"
+    user_type: website-visitor
+    deploy_notes: "Embedded as <script> on agency customer websites. Website visitors see the chat bubble."
+
+  - kind: standalone
+    key: invoice-preview
+    display_name: Invoice / Estimate (Customer View)
+    github_repo: ghl-invoice-preview
+    deploy_target: cloud-run
+    url_pattern: "email link → /invoice/:invoiceId/view | /estimate/:estimateId/view"
+    backend_api_prefixes:
+      - /invoices/
+      - /estimates/
+      - /payments/
+      - /v1/businesses/:businessId/invoices
+    product_area: "Payments — Invoice Public View"
+    owner: "@leadgen-payments"
+    user_type: customer
+    deploy_notes: "Customer receives email with link. Renders invoice/estimate in browser. May allow payment."
+
+  - kind: standalone
+    key: checkout-payments
+    display_name: Checkout / Payment Pages (Public)
+    github_repo: dev-commerce-frontend
+    deploy_target: cloud-run
+    url_pattern: "/checkout/:orderId | {customDomain}/checkout | /order-confirmation/:orderId"
+    backend_api_prefixes:
+      - /payments/
+      - /orders/
+      - /products/
+      - /v1/payments/
+      - /v1/orders/
+    product_area: "Payments — Checkout (Public)"
+    owner: "@leadgen-payments"
+    user_type: customer
+    deploy_notes: "Customer-facing checkout flow. Processes payment. Includes order confirmation."
+
+  - kind: standalone
+    key: store-front
+    display_name: E-commerce Storefront (Public)
+    github_repo: leadgen-store-frontend
+    deploy_target: cloud-run
+    url_pattern: "store.{domain}.com | /store/:locationId | {customDomain}/store"
+    backend_api_prefixes:
+      - /products/
+      - /ecommerce/
+      - /v1/locations/:locationId/store
+      - /orders/
+    product_area: "E-commerce — Public Storefront"
+    owner: "@leadgen-ecommerce"
+    user_type: customer
+    deploy_notes: "Public product catalog. Customers browse and add to cart. Links to checkout."
+
+  - kind: standalone
+    key: email-rendered-view
+    display_name: Email Rendered in Browser
+    github_repo: email-preview
+    deploy_target: cloud-run
+    url_pattern: "/email/preview/:emailId | email client 'View in browser' link"
+    backend_api_prefixes:
+      - /emails/
+      - /email-campaigns/
+      - /v1/locations/:locationId/emails
+    product_area: "Email Marketing — Rendered View"
+    owner: "@automation-email"
+    user_type: email-subscriber
+    deploy_notes: "The 'View in browser' link in emails. Renders HTML email for subscribers."
+
+  - kind: standalone
+    key: blog-public
+    display_name: Blog Pages (Public)
+    github_repo: ghl-blogging
+    deploy_target: cloud-run
+    url_pattern: "blog.{domain}.com | /{locationId}/blog/:slug | {customDomain}/blog"
+    backend_api_prefixes:
+      - /blogs/
+      - /websites/
+      - /v1/locations/:locationId/blogs
+    product_area: "Blogging — Public Blog"
+    owner: "@leadgen-websites"
+    user_type: reader
+    deploy_notes: "Public blog published via GHL. Readers browse posts on custom domain."
+
+  - kind: standalone
+    key: affiliate-client-portal
+    display_name: Affiliate Portal (Affiliate-Facing)
+    github_repo: automation-am-client-portal
+    deploy_target: cloud-run
+    url_pattern: "affiliates.{domain}.com | /affiliate-portal/:affiliateId"
+    backend_api_prefixes:
+      - /affiliate-manager/
+      - /v1/affiliate-manager/
+    product_area: "Affiliate Management — Affiliate Portal"
+    owner: "@revex-affiliate"
+    user_type: affiliate
+    deploy_notes: "Affiliates log in here to see their commissions, links, and payouts."
+
+  - kind: standalone
+    key: proposals-contracts
+    display_name: Proposals & Contracts (Client Signing)
+    github_repo: ghl-crm-frontend
+    app_dir: apps/documents
+    deploy_target: cloud-run
+    url_pattern: "email link → /proposal/:proposalId | /contract/:contractId/sign"
+    backend_api_prefixes:
+      - /proposals/
+      - /documents/
+      - /v1/documents/
+    product_area: "CRM — Documents & Contracts (Public Signing)"
+    owner: "@crm-documents"
+    user_type: client
+    deploy_notes: "Client receives email to review and sign proposal or contract. No login required."
+
+  - kind: standalone
+    key: vibe-page-renderer
+    display_name: Vibe AI Page Renderer
+    github_repo: vibe-platform
+    deploy_target: cloud-run
+    url_pattern: "{customDomain} | vibe.{domain}.com"
+    backend_api_prefixes:
+      - /vibe/
+      - /websites/
+    product_area: "Funnels & Websites — Vibe AI Pages"
+    owner: "@leadgen-funnels"
+    user_type: prospect
+    deploy_notes: "AI-generated pages rendered to public visitors. Served on custom domains."
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # SSR — Nuxt 3 server-side rendered apps, per-client custom domains
+  # ─────────────────────────────────────────────────────────────────────────────
+
+  - kind: ssr
+    key: membership-courses-portal
+    display_name: Memberships & Courses (Student Portal)
+    github_repo: ghl-membership-frontend
+    deploy_target: cloud-run-per-instance
+    url_pattern: "{courseName}.{agencyDomain}.com | custom domain per client"
+    backend_api_prefixes:
+      - /membership/
+      - /courses/
+      - /v1/locations/:locationId/courses
+      - /v1/locations/:locationId/memberships
+      - /clientclub/
+    product_area: "Memberships & Courses — Student Portal"
+    owner: "@revex-membership"
+    user_type: student
+    deploy_notes: "Nuxt 3 SSR. Students access course content, assignments, community. Custom domain per creator."
+
+  - kind: ssr
+    key: client-portal
+    display_name: Client Portal (Client-Facing)
+    github_repo: ghl-revex-frontend
+    app_dir: apps/clientportal
+    deploy_target: gcs
+    url_pattern: "preview-internal.clientclub.net | {customDomain} per agency"
+    backend_api_prefixes:
+      - /clientportal/
+      - /clientclub/
+      - /invoices/
+      - /appointments/
+      - /v1/contacts/:contactId
+      - /v1/locations/:locationId/invoices
+    product_area: "Client Portal"
+    owner: "@revex-clientportal"
+    user_type: client
+    deploy_notes: "Clients log in to see invoices, documents, appointments. Vue 3 Vite, deployed to GCS."
+
+  - kind: ssr
+    key: communities-member-portal
+    display_name: Communities (Member-Facing)
+    github_repo: ghl-revex-frontend
+    app_dir: apps/communities
+    deploy_target: gcs
+    url_pattern: "{community}.{domain}.com | preview-internal.clientclub.net/communities/:slug"
+    backend_api_prefixes:
+      - /communities/
+      - /clientclub/
+      - /v1/locations/:locationId/communities
+    product_area: "Communities — Member Portal"
+    owner: "@revex-communities"
+    user_type: community-member
+    deploy_notes: "Community members interact with posts, events, groups. Vue 3 Vite, GCS-hosted."
+
+  - kind: ssr
+    key: gokollab-workspace
+    display_name: GoKollab Workspace (Member-Facing)
+    github_repo: ghl-membership-frontend
+    app_dir: apps/gokollab
+    deploy_target: gcs
+    url_pattern: "{workspace}.leadconnectorhq.com | storage.googleapis.com/revex-gokollab-preview"
+    backend_api_prefixes:
+      - /gokollab/
+      - /membership/
+      - /communities/
+    product_area: "GoKollab — Workspace"
+    owner: "@revex-gokollab"
+    user_type: workspace-member
+    deploy_notes: "Collaborative workspace for groups/teams. Nuxt 3 / Vue 3, custom domain or GCS."
+
+  - kind: ssr
+    key: revex-membership-frontend
+    display_name: RevEx Membership (Standalone Learner App)
+    github_repo: ghl-revex-membership-frontend
+    deploy_target: cloud-run
+    url_pattern: "{client}.{agencyDomain}.com | custom domain"
+    backend_api_prefixes:
+      - /membership/
+      - /courses/
+      - /v1/locations/:locationId/memberships
+    product_area: "Memberships & Courses — Learner App"
+    owner: "@revex-membership"
+    user_type: student
+    deploy_notes: "Alternate / newer RevEx membership frontend. Nuxt 3 SSR per-client."
