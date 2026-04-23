@@ -1,0 +1,176 @@
+topics:
+  # ──────────────────────────────────────────────────────────────────────────
+  # Checkout orchestration topics (courses app → integration workers)
+  # ──────────────────────────────────────────────────────────────────────────
+  - id: "CHECKOUT_INTEGRATIONS"
+    aliases:
+      - "CHECKOUT_ORCHESTRATION_INTEGRATIONS"
+      - "CheckoutOrchestrationWorkerEvent.CHECKOUT_ORCHESTRATION_INTEGRATIONS"
+      - "revex-courses-checkout-orch-integrations-events"
+      - "checkout-orch-integrations"
+    description: "Checkout integrations worker — runs DripCreation, ExternalTriggers, Analytics post-checkout"
+    subscriber_service: "revex-membership-checkout-integrations-worker"
+    subscriber_repo: "ghl-revex-backend"
+    product_areas:
+      - product: "Memberships — Checkout Flow"
+        owner: "@revex-membership"
+        user_impact: "Membership students lose drip sequences, external trigger webhooks, and analytics events post-purchase"
+      - product: "Communities — Checkout Flow"
+        owner: "@revex-communities"
+        user_impact: "Community members lose post-purchase integrations (drips, webhooks, analytics) after community offer checkout"
+    mfa_app_keys:
+      - "membership-courses-portal"
+      - "communities-member-portal"
+
+  - id: "CHECKOUT_ORCHESTRATION"
+    aliases:
+      - "CheckoutOrchestrationWorkerEvent.CHECKOUT_ORCHESTRATION"
+      - "revex-courses-checkout-orch-events"
+      - "checkout-orchestration"
+    description: "Parent checkout orchestration — validates offer and grants access"
+    subscriber_service: "revex-membership-checkout-parent-worker"
+    subscriber_repo: "ghl-revex-backend"
+    product_areas:
+      - product: "Memberships — Checkout Flow"
+        owner: "@revex-membership"
+        user_impact: "Membership offer purchase flow broken — validation/access-grant fails"
+      - product: "Courses — Learner Access"
+        owner: "@revex-courses"
+        user_impact: "Learners do not get course access after purchasing an offer"
+    mfa_app_keys:
+      - "membership-courses-portal"
+
+  - id: "CHECKOUT_NOTIFICATIONS"
+    aliases:
+      - "CheckoutOrchestrationWorkerEvent.CHECKOUT_NOTIFICATIONS"
+      - "revex-courses-checkout-orch-notifications-events"
+      - "checkout-notifications"
+    description: "Post-checkout notification worker — sends welcome/access emails"
+    subscriber_service: "revex-membership-checkout-notifications-worker"
+    subscriber_repo: "ghl-revex-backend"
+    product_areas:
+      - product: "Memberships — Notifications"
+        owner: "@revex-membership"
+        user_impact: "Welcome emails and course access notification emails not sent to purchasers"
+    mfa_app_keys: []
+
+  - id: "CHECKOUT_ACCESS_GRANT"
+    aliases:
+      - "CheckoutOrchestrationWorkerEvent.CHECKOUT_ACCESS_GRANT"
+      - "checkout-access-grant"
+    description: "Standalone access grant step — directly grants product access without full orchestration"
+    subscriber_service: "revex-membership-checkout-access-grant-worker"
+    subscriber_repo: "ghl-revex-backend"
+    product_areas:
+      - product: "Memberships — Checkout Flow"
+        owner: "@revex-membership"
+        user_impact: "Direct access grants broken — users do not receive purchased product access"
+      - product: "Courses — Learner Access"
+        owner: "@revex-courses"
+        user_impact: "Course product access not granted"
+    mfa_app_keys:
+      - "membership-courses-portal"
+
+  # ──────────────────────────────────────────────────────────────────────────
+  # Communities topics
+  # ──────────────────────────────────────────────────────────────────────────
+  - id: "COMMUNITY_POST_CREATED"
+    aliases:
+      - "community.post.created"
+      - "communities.post.created"
+      - "CommunitiesTopics.COMMUNITY_POST_CREATED"
+    description: "New post published in a community group"
+    subscriber_service: "communities-notifications-worker"
+    subscriber_repo: "ghl-revex-backend"
+    product_areas:
+      - product: "Communities — Member Portal"
+        owner: "@revex-communities"
+        user_impact: "Community members miss new post notifications and feed updates"
+    mfa_app_keys:
+      - "communities-member-portal"
+
+  - id: "COMMUNITY_MEMBER_JOINED"
+    aliases:
+      - "community.member.joined"
+      - "communities.member.joined"
+      - "CommunitiesTopics.COMMUNITY_MEMBER_JOINED"
+    description: "Member joined a community group"
+    subscriber_service: "communities-notifications-worker"
+    subscriber_repo: "ghl-revex-backend"
+    product_areas:
+      - product: "Communities — Member Portal"
+        owner: "@revex-communities"
+        user_impact: "New member welcome notifications not sent; member count not updated in portal"
+    mfa_app_keys:
+      - "communities-member-portal"
+      - "communitiesApp"
+
+  # ──────────────────────────────────────────────────────────────────────────
+  # GoKollab topics
+  # ──────────────────────────────────────────────────────────────────────────
+  - id: "GOKOLLAB_WORKSPACE_CREATED"
+    aliases:
+      - "gokollab.workspace.created"
+      - "GoKollabTopics.WORKSPACE_CREATED"
+    description: "New GoKollab workspace provisioned"
+    subscriber_service: "gokollab-provisioning-worker"
+    subscriber_repo: "ghl-revex-backend"
+    product_areas:
+      - product: "GoKollab — Workspace"
+        owner: "@revex-gokollab"
+        user_impact: "Workspace provisioning delayed; members cannot access new workspace"
+    mfa_app_keys:
+      - "gokollab-workspace"
+      - "goKollabApp"
+
+  # ──────────────────────────────────────────────────────────────────────────
+  # Courses topics
+  # ──────────────────────────────────────────────────────────────────────────
+  - id: "COURSE_PUBLISHED"
+    aliases:
+      - "course.published"
+      - "CoursesTopics.COURSE_PUBLISHED"
+    description: "Course published by creator — triggers indexing and notifications"
+    subscriber_service: "courses-indexing-worker"
+    subscriber_repo: "ghl-revex-backend"
+    product_areas:
+      - product: "Courses — Authoring"
+        owner: "@revex-courses"
+        user_impact: "Course not discoverable in learner portal after publish; search index stale"
+      - product: "Courses — Learner Access"
+        owner: "@revex-courses"
+        user_impact: "Enrolled learners do not receive new-content notifications"
+    mfa_app_keys:
+      - "membership-courses-portal"
+      - "coursesApp"
+
+  - id: "COURSE_PROGRESS_UPDATED"
+    aliases:
+      - "course.progress.updated"
+      - "CoursesTopics.COURSE_PROGRESS_UPDATED"
+    description: "Learner progress updated — triggers completion check and certificate generation"
+    subscriber_service: "courses-completion-worker"
+    subscriber_repo: "ghl-revex-backend"
+    product_areas:
+      - product: "Courses — Learner Access"
+        owner: "@revex-courses"
+        user_impact: "Completion certificates not generated; progress badges delayed"
+    mfa_app_keys:
+      - "membership-courses-portal"
+
+  # ──────────────────────────────────────────────────────────────────────────
+  # Client portal topics
+  # ──────────────────────────────────────────────────────────────────────────
+  - id: "CLIENT_PORTAL_INVITE_SENT"
+    aliases:
+      - "clientPortal.invite.sent"
+      - "ClientPortalTopics.INVITE_SENT"
+    description: "Client portal invitation sent to contact"
+    subscriber_service: "client-portal-email-worker"
+    subscriber_repo: "ghl-revex-backend"
+    product_areas:
+      - product: "Client Portal"
+        owner: "@revex-membership"
+        user_impact: "Client portal invitation emails not delivered; clients cannot access portal"
+    mfa_app_keys:
+      - "client-portal"
