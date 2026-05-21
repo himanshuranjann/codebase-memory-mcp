@@ -66,11 +66,13 @@ persistence:
 # Environment — secrets injected from GCP Secret Manager via GHL secret-manager pattern
 env:
   PORT: "8080"
-  FLEET_CONCURRENCY: "3"
-  INDEXER_CLIENTS: "3"
+  FLEET_CONCURRENCY: "2"
+  BRIDGE_CLIENTS: "1"
+  INDEXER_CLIENTS: "2"
   INDEXER_CLIENT_MAX_USES: "20"
+  DISCOVERY_CLIENTS: "2"
   CRON_INCREMENTAL: "0 3 * * *"
-  CRON_FULL: "0 2 * * 0"
+  CRON_FULL: "0 2 1 * *"
   SCHEDULED_INDEXING_ENABLED: "true"
   CBM_CACHE_DIR: "/tmp/codebase-memory-mcp"
   FLEET_CACHE_DIR: "/data/fleet-cache"
