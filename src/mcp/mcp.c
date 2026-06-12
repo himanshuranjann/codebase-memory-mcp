@@ -2684,6 +2684,16 @@ static char *handle_index_repository(cbm_mcp_server_t *srv, const char *args) {
 
     char *result = cbm_mcp_text_result(json, rc != 0);
     free(json);
+
+    /* Release the indexed store so follow-up requests reopen from the fresh
+     * checkpointed database file instead of a long-lived write connection. */
+    if (srv->owns_store && srv->store) {
+        cbm_store_close(srv->store);
+        srv->store = NULL;
+    }
+    free(srv->current_project);
+    srv->current_project = NULL;
+
     return result;
 }
 
