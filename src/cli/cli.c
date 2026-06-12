@@ -262,6 +262,19 @@ static bool find_in_path(const char *name, char *out, size_t out_sz) {
         if (is_executable(out)) {
             return true;
         }
+#ifdef _WIN32
+        /* On Windows executables carry an extension (PATHEXT). A CLI like
+         * opencode is often installed as a .cmd / .ps1 / .exe shim (e.g. via
+         * mise or npm), so the bare-name probe above misses it (#221). Try the
+         * common executable extensions before moving to the next PATH entry. */
+        static const char *const win_exts[] = {".exe", ".cmd", ".bat", ".ps1", NULL};
+        for (int i = 0; win_exts[i]; i++) {
+            snprintf(out, out_sz, "%s/%s%s", dir, name, win_exts[i]);
+            if (is_executable(out)) {
+                return true;
+            }
+        }
+#endif
         dir = strtok_r(NULL, PATH_DELIM, &saveptr);
     }
     return false;
@@ -969,6 +982,55 @@ static bool dir_exists(const char *path) {
     return stat(path, &st) == 0 && S_ISDIR(st.st_mode);
 }
 
+/* Resolve the Claude Code config dir.
+ * Honors $CLAUDE_CONFIG_DIR; falls back to "$home_dir/.claude". */
+static void cbm_claude_config_dir(const char *home_dir, char *out, size_t out_sz) {
+    if (out_sz == 0) {
+        return;
+    }
+    out[0] = '\0';
+    char env_buf[CLI_BUF_1K];
+    const char *env = cbm_safe_getenv("CLAUDE_CONFIG_DIR", env_buf, sizeof(env_buf), NULL);
+    if (env && env[0]) {
+        snprintf(out, out_sz, "%s", env);
+    } else if (home_dir && home_dir[0]) {
+        snprintf(out, out_sz, "%s/.claude", home_dir);
+    }
+}
+
+/* Resolve the parent dir containing `.claude.json` (Claude Code's user config file).
+ * Honors $CLAUDE_CONFIG_DIR; falls back to "$home_dir". */
+static void cbm_claude_user_root(const char *home_dir, char *out, size_t out_sz) {
+    if (out_sz == 0) {
+        return;
+    }
+    out[0] = '\0';
+    char env_buf[CLI_BUF_1K];
+    const char *env = cbm_safe_getenv("CLAUDE_CONFIG_DIR", env_buf, sizeof(env_buf), NULL);
+    if (env && env[0]) {
+        snprintf(out, out_sz, "%s", env);
+    } else if (home_dir && home_dir[0]) {
+        snprintf(out, out_sz, "%s", home_dir);
+    }
+}
+
+/* Build the hook command string written into Claude Code's settings.json.
+ * Honors $CLAUDE_CONFIG_DIR. When CLAUDE_CONFIG_DIR is unset, preserves the
+ * legacy tilde-expanded form so settings.json stays portable across HOME values. */
+static void cbm_resolve_hook_command(const char *script_name, char *out, size_t out_sz) {
+    if (out_sz == 0) {
+        return;
+    }
+    out[0] = '\0';
+    char env_buf[CLI_BUF_1K];
+    const char *env = cbm_safe_getenv("CLAUDE_CONFIG_DIR", env_buf, sizeof(env_buf), NULL);
+    if (env && env[0]) {
+        snprintf(out, out_sz, "%s/hooks/%s", env, script_name);
+    } else {
+        snprintf(out, out_sz, "~/.claude/hooks/%s", script_name);
+    }
+}
+
 cbm_detected_agents_t cbm_detect_agents(const char *home_dir) {
     cbm_detected_agents_t agents;
     memset(&agents, 0, sizeof(agents));
@@ -978,8 +1040,8 @@ cbm_detected_agents_t cbm_detect_agents(const char *home_dir) {
 
     char path[CLI_BUF_1K];
 
-    snprintf(path, sizeof(path), "%s/.claude", home_dir);
-    agents.claude_code = dir_exists(path);
+    cbm_claude_config_dir(home_dir, path, sizeof(path));
+    agents.claude_code = path[0] != '\0' && dir_exists(path);
 
     snprintf(path, sizeof(path), "%s/.codex", home_dir);
     agents.codex = dir_exists(path);
@@ -998,10 +1060,12 @@ cbm_detected_agents_t cbm_detect_agents(const char *home_dir) {
 
     agents.opencode = cbm_find_cli("opencode", home_dir)[0] != '\0';
 
-    snprintf(path, sizeof(path), "%s/.gemini/antigravity", home_dir);
+    /* Antigravity CLI (2026 unification) installs under ~/.gemini/antigravity-cli/
+     * (brain/, mcp/, settings.json), with MCP config in the shared
+     * ~/.gemini/config/mcp_config.json. */
+    snprintf(path, sizeof(path), "%s/.gemini/antigravity-cli", home_dir);
     if (dir_exists(path)) {
         agents.antigravity = true;
-        agents.gemini = true;
     }
 
     agents.aider = cbm_find_cli("aider", home_dir)[0] != '\0';
@@ -1026,8 +1090,16 @@ cbm_detected_agents_t cbm_detect_agents(const char *home_dir) {
 #endif
     agents.vscode = dir_exists(path);
 
+    /* Cursor stores its user MCP config in ~/.cursor/mcp.json on all platforms. */
+    snprintf(path, sizeof(path), "%s/.cursor", home_dir);
+    agents.cursor = dir_exists(path);
+
     snprintf(path, sizeof(path), "%s/.openclaw", home_dir);
     agents.openclaw = dir_exists(path);
+
+    /* Kiro: ~/.kiro/ */
+    snprintf(path, sizeof(path), "%s/.kiro", home_dir);
+    agents.kiro = dir_exists(path);
 
     return agents;
 }
@@ -1365,6 +1437,115 @@ int cbm_remove_codex_mcp(const char *config_path) {
     return rc;
 }
 
+/* ── SessionStart reminder hook (Codex / Gemini / Antigravity) ──────
+ * Same methodology as the Claude Code SessionStart hook: a non-blocking
+ * lifecycle hook whose stdout is injected as session context, reminding the
+ * agent to use codebase-memory-mcp graph tools first. The command is written
+ * so it is valid both inside a TOML single-quoted literal (Codex config.toml)
+ * and a JSON string (Gemini settings.json) — i.e. it contains NO single quotes
+ * and NO newlines. (issues #330 + Gemini/Antigravity parity) */
+#define CMM_SESSION_REMINDER_CMD                                                    \
+    "echo \"Code discovery: prefer codebase-memory-mcp (search_graph, trace_path, " \
+    "get_code_snippet, query_graph, search_code) over grep/file-read; run "         \
+    "index_repository first if the project is not indexed.\""
+
+/* Sentinel-delimited block so upsert/remove are robust to the nested TOML
+ * array-of-tables (which both start with '['). */
+#define CODEX_HOOK_BEGIN "# >>> codebase-memory-mcp SessionStart >>>"
+#define CODEX_HOOK_END "# <<< codebase-memory-mcp SessionStart <<<"
+
+/* Splice out an existing [CODEX_HOOK_BEGIN .. CODEX_HOOK_END] block (inclusive,
+ * plus a leading newline). Returns a newly-malloc'd string the caller frees, or
+ * NULL if no block was present (content is left untouched). */
+static char *codex_hook_strip(const char *content) {
+    char *begin = strstr(content, CODEX_HOOK_BEGIN);
+    if (!begin) {
+        return NULL;
+    }
+    char *end = strstr(begin, CODEX_HOOK_END);
+    if (!end) {
+        return NULL;
+    }
+    end += strlen(CODEX_HOOK_END);
+    if (*end == '\n') {
+        end++;
+    }
+    /* Drop one leading newline before the block, if any. */
+    char *cut = begin;
+    if (cut > content && *(cut - CLI_SKIP_ONE) == '\n') {
+        cut--;
+    }
+    size_t prefix_len = (size_t)(cut - content);
+    size_t suffix_len = strlen(end);
+    char *out = malloc(prefix_len + suffix_len + CLI_SKIP_ONE);
+    if (!out) {
+        return NULL;
+    }
+    memcpy(out, content, prefix_len);
+    memcpy(out + prefix_len, end, suffix_len);
+    out[prefix_len + suffix_len] = '\0';
+    return out;
+}
+
+/* Install/update the Codex SessionStart reminder hook in config.toml. */
+int cbm_upsert_codex_hooks(const char *config_path) {
+    if (!config_path) {
+        return CLI_ERR;
+    }
+    char block[CLI_BUF_2K];
+    snprintf(block, sizeof(block),
+             "\n" CODEX_HOOK_BEGIN "\n"
+             "[[hooks.SessionStart]]\n"
+             "matcher = \"startup|resume|clear|compact\"\n\n"
+             "[[hooks.SessionStart.hooks]]\n"
+             "type = \"command\"\n"
+             "command = '%s'\n" CODEX_HOOK_END "\n",
+             CMM_SESSION_REMINDER_CMD);
+
+    size_t len = 0;
+    char *content = read_file_str(config_path, &len);
+    if (!content) {
+        return write_file_str(config_path, block + CLI_SKIP_ONE); /* skip leading newline */
+    }
+    char *stripped = codex_hook_strip(content);
+    const char *base = stripped ? stripped : content;
+    size_t base_len = strlen(base);
+    char *result = malloc(base_len + strlen(block) + CLI_SKIP_ONE);
+    if (!result) {
+        free(content);
+        free(stripped);
+        return CLI_ERR;
+    }
+    memcpy(result, base, base_len);
+    memcpy(result + base_len, block, strlen(block));
+    result[base_len + strlen(block)] = '\0';
+    int rc = write_file_str(config_path, result);
+    free(content);
+    free(stripped);
+    free(result);
+    return rc;
+}
+
+int cbm_remove_codex_hooks(const char *config_path) {
+    if (!config_path) {
+        return CLI_ERR;
+    }
+    size_t len = 0;
+    char *content = read_file_str(config_path, &len);
+    if (!content) {
+        return CLI_TRUE;
+    }
+    char *stripped = codex_hook_strip(content);
+    if (!stripped) {
+        free(content);
+        return CLI_TRUE; /* nothing to remove */
+    }
+    int rc = write_file_str(config_path, stripped);
+    free(content);
+    free(stripped);
+    return rc;
+}
+
 /* ── OpenCode MCP config (JSON with "mcp" key) ───────────────── */
 
 int cbm_upsert_opencode_mcp(const char *binary_path, const char *config_path) {
@@ -1458,18 +1639,33 @@ int cbm_remove_antigravity_mcp(const char *config_path) {
 
 /* ── Claude Code pre-tool hooks ───────────────────────────────── */
 
-#define CMM_HOOK_MATCHER "Grep|Glob|Read|Search"
-#define CMM_HOOK_COMMAND "~/.claude/hooks/cbm-code-discovery-gate"
+/* Matcher intentionally excludes Read: gating Read breaks Claude Code's
+ * read-before-edit invariant (issue #362). The hook is a non-blocking
+ * augmenter, never a gate. */
+#define CMM_HOOK_MATCHER "Grep|Glob"
+/* Basename only; the full command path is resolved at install time via
+ * cbm_resolve_hook_command so $CLAUDE_CONFIG_DIR is honored. */
+#define CMM_HOOK_GATE_SCRIPT "cbm-code-discovery-gate"
+/* Hard backstop in settings.json; the binary also self-bounds with an
+ * in-process deadline well under this. */
+#define CMM_HOOK_TIMEOUT_SEC 5
 
 /* Old matcher values from previous versions — recognized during upgrade so
- * upsert_hooks_json can remove them before inserting the current matcher. */
-static const char *cmm_old_matchers[] = {
+ * upsert/remove can clean them up before inserting the current matcher.
+ * Per-agent lists (no shared global): each caller passes its own. */
+static const char *const cmm_claude_old_matchers[] = {
+    "Grep|Glob|Read|Search",
     "Grep|Glob|Read",
     NULL,
 };
+static const char *const cmm_gemini_old_matchers[] = {
+    "google_search|read_file|grep_search",
+    NULL,
+};
 
-/* Check if a PreToolUse array entry matches our hook (current or old matcher). */
-static bool is_cmm_hook_entry(yyjson_mut_val *entry, const char *matcher_str) {
+/* Check if a hook array entry is ours (current matcher or a known old one). */
+static bool is_cmm_hook_entry(yyjson_mut_val *entry, const char *matcher_str,
+                              const char *const *old_matchers) {
     yyjson_mut_val *matcher = yyjson_mut_obj_get(entry, "matcher");
     if (!matcher || !yyjson_mut_is_str(matcher)) {
         return false;
@@ -1482,8 +1678,8 @@ static bool is_cmm_hook_entry(yyjson_mut_val *entry, const char *matcher_str) {
         return true;
     }
     /* Also match old versions for backwards-compatible upgrade */
-    for (int i = 0; cmm_old_matchers[i]; i++) {
-        if (strcmp(val, cmm_old_matchers[i]) == 0) {
+    for (int i = 0; old_matchers && old_matchers[i]; i++) {
+        if (strcmp(val, old_matchers[i]) == 0) {
             return true;
         }
     }
@@ -1497,12 +1693,15 @@ typedef struct {
     const char *hook_event;
     const char *matcher_str;
     const char *command_str;
+    const char *const *old_matchers; /* NULL-terminated; may be NULL */
+    int timeout_sec;                 /* >0 adds "timeout" to the hook entry */
 } hooks_upsert_args_t;
 static int upsert_hooks_json(hooks_upsert_args_t args) {
     const char *settings_path = args.settings_path;
     const char *hook_event = args.hook_event;
     const char *matcher_str = args.matcher_str;
     const char *command_str = args.command_str;
+    const char *const *old_matchers = args.old_matchers;
     if (!settings_path) {
         return CLI_ERR;
     }
@@ -1545,7 +1744,7 @@ static int upsert_hooks_json(hooks_upsert_args_t args) {
     size_t max;
     yyjson_mut_val *item;
     yyjson_mut_arr_foreach(event_arr, idx, max, item) {
-        if (is_cmm_hook_entry(item, matcher_str)) {
+        if (is_cmm_hook_entry(item, matcher_str, old_matchers)) {
             yyjson_mut_arr_remove(event_arr, idx);
             break;
         }
@@ -1559,6 +1758,9 @@ static int upsert_hooks_json(hooks_upsert_args_t args) {
     yyjson_mut_val *hook_obj = yyjson_mut_obj(mdoc);
     yyjson_mut_obj_add_str(mdoc, hook_obj, "type", "command");
     yyjson_mut_obj_add_str(mdoc, hook_obj, "command", command_str);
+    if (args.timeout_sec > 0) {
+        yyjson_mut_obj_add_int(mdoc, hook_obj, "timeout", args.timeout_sec);
+    }
     yyjson_mut_arr_append(hooks_arr, hook_obj);
     yyjson_mut_obj_add_val(mdoc, entry, "hooks", hooks_arr);
 
@@ -1575,11 +1777,13 @@ typedef struct {
     const char *settings_path;
     const char *hook_event;
     const char *matcher_str;
+    const char *const *old_matchers; /* NULL-terminated; may be NULL */
 } hooks_remove_args_t;
 static int remove_hooks_json(hooks_remove_args_t args) {
     const char *settings_path = args.settings_path;
     const char *hook_event = args.hook_event;
     const char *matcher_str = args.matcher_str;
+    const char *const *old_matchers = args.old_matchers;
     if (!settings_path) {
         return CLI_ERR;
     }
@@ -1614,10 +1818,16 @@ static int remove_hooks_json(hooks_remove_args_t args) {
     size_t max;
     yyjson_mut_val *item;
     yyjson_mut_arr_foreach(event_arr, idx, max, item) {
-        if (is_cmm_hook_entry(item, matcher_str)) {
+        if (is_cmm_hook_entry(item, matcher_str, old_matchers)) {
             yyjson_mut_arr_remove(event_arr, idx);
             break;
         }
+    }
+
+    /* Prune the event key once its array is empty, so removing our hook leaves
+     * no stale "<Event>": [] cruft behind. */
+    if (yyjson_mut_arr_size(event_arr) == 0) {
+        yyjson_mut_obj_remove_key(hooks, hook_event);
     }
 
     int rc = write_json_file(settings_path, mdoc);
@@ -1626,49 +1836,71 @@ static int remove_hooks_json(hooks_remove_args_t args) {
 }
 
 int cbm_upsert_claude_hooks(const char *settings_path) {
-    return upsert_hooks_json(
-        (hooks_upsert_args_t){settings_path, "PreToolUse", CMM_HOOK_MATCHER, CMM_HOOK_COMMAND});
+    char command[CLI_BUF_1K];
+    cbm_resolve_hook_command(CMM_HOOK_GATE_SCRIPT, command, sizeof(command));
+    return upsert_hooks_json((hooks_upsert_args_t){
+        .settings_path = settings_path,
+        .hook_event = "PreToolUse",
+        .matcher_str = CMM_HOOK_MATCHER,
+        .command_str = command,
+        .old_matchers = cmm_claude_old_matchers,
+        .timeout_sec = CMM_HOOK_TIMEOUT_SEC,
+    });
 }
 
 int cbm_remove_claude_hooks(const char *settings_path) {
-    return remove_hooks_json((hooks_remove_args_t){settings_path, "PreToolUse", CMM_HOOK_MATCHER});
+    return remove_hooks_json((hooks_remove_args_t){
+        .settings_path = settings_path,
+        .hook_event = "PreToolUse",
+        .matcher_str = CMM_HOOK_MATCHER,
+        .old_matchers = cmm_claude_old_matchers,
+    });
 }
 
-/* Install the code discovery gate script to ~/.claude/hooks/.
- * Blocks the first Grep/Glob/Read/Search call per session (exit 2 + stderr),
- * nudging Claude toward codebase-memory-mcp. All subsequent calls in the same
- * session pass through (gate file keyed on PPID). */
-static void cbm_install_hook_gate_script(const char *home) {
-    if (!home) {
+/* Install the search-augmenter shim to ~/.claude/hooks/.
+ * The shim is a thin wrapper that delegates to `<binary> hook-augment`,
+ * which adds graph context to Grep/Glob calls. It NEVER blocks a tool call:
+ * a missing/old/hung binary results in a silent exit 0 (issue #362/#288).
+ * The legacy filename `cbm-code-discovery-gate` is retained so existing
+ * settings.json entries and uninstall keep working with zero migration. */
+void cbm_install_hook_gate_script(const char *home, const char *binary_path) {
+    if (!home || !binary_path) {
+        return;
+    }
+    /* Defensive: refuse to embed a binary path containing a double-quote, which
+     * would break the BIN="..." shell quoting in the generated shim. In normal
+     * installs this is unreachable (paths come from cbm_detect_self_path), but
+     * fail-loud here beats silently emitting a malformed script. */
+    if (strchr(binary_path, '"') != NULL) {
+        return;
+    }
+    char config_dir[CLI_BUF_1K];
+    cbm_claude_config_dir(home, config_dir, sizeof(config_dir));
+    if (!config_dir[0]) {
         return;
     }
     char hooks_dir[CLI_BUF_1K];
-    snprintf(hooks_dir, sizeof(hooks_dir), "%s/.claude/hooks", home);
+    snprintf(hooks_dir, sizeof(hooks_dir), "%s/hooks", config_dir);
     cbm_mkdir_p(hooks_dir, CLI_OCTAL_PERM);
 
     char script_path[CLI_BUF_1K];
-    snprintf(script_path, sizeof(script_path), "%s/cbm-code-discovery-gate", hooks_dir);
+    snprintf(script_path, sizeof(script_path), "%s/" CMM_HOOK_GATE_SCRIPT, hooks_dir);
 
     FILE *f = fopen(script_path, "w");
     if (!f) {
         return;
     }
-    (void)fprintf(f, "#!/bin/bash\n"
-                     "# Gate hook: nudges Claude toward codebase-memory-mcp for code discovery.\n"
-                     "# First Grep/Glob/Read/Search per session -> block. Subsequent -> allow.\n"
-                     "# PPID = Claude Code process PID, unique per session.\n"
-                     "GATE=/tmp/cbm-code-discovery-gate-$PPID\n"
-                     "find /tmp -name 'cbm-code-discovery-gate-*' -mtime +1 -delete 2>/dev/null\n"
-                     "if [ -f \"$GATE\" ]; then\n"
-                     "    exit 0\n"
-                     "fi\n"
-                     "touch \"$GATE\"\n"
-                     "echo 'BLOCKED: For code discovery, use codebase-memory-mcp tools first: "
-                     "search_graph(name_pattern) to find functions/classes, trace_path() for "
-                     "call chains, get_code_snippet(qualified_name) to read source. If the graph "
-                     "is not indexed yet, call index_repository first. Fall back to Grep/Glob/Read "
-                     "only for text content search. If you need Grep, retry.' >&2\n"
-                     "exit 2\n");
+    (void)fprintf(f,
+                  "#!/bin/bash\n"
+                  "# codebase-memory-mcp search augmenter (Claude Code PreToolUse).\n"
+                  "# NOTE: the legacy filename is kept for zero-migration upgrades.\n"
+                  "# Despite the name this NEVER blocks a tool call - it only adds\n"
+                  "# graph context. Any failure is silent (exit 0, no output).\n"
+                  "BIN=\"%s\"\n"
+                  "[ -x \"$BIN\" ] || exit 0\n"
+                  "\"$BIN\" hook-augment 2>/dev/null\n"
+                  "exit 0\n",
+                  binary_path);
     /* fchmod before close to avoid TOCTOU race (CodeQL cpp/toctou-race-condition) */
 #ifndef _WIN32
     fchmod(fileno(f), CLI_OCTAL_PERM);
@@ -1680,18 +1912,23 @@ static void cbm_install_hook_gate_script(const char *home) {
 }
 
 /* SessionStart hook: remind agent to use MCP tools on every context reset. */
-#define CMM_SESSION_COMMAND "~/.claude/hooks/cbm-session-reminder"
+#define CMM_SESSION_REMINDER_SCRIPT "cbm-session-reminder"
 
 static void cbm_install_session_reminder_script(const char *home) {
     if (!home) {
         return;
     }
+    char config_dir[CLI_BUF_1K];
+    cbm_claude_config_dir(home, config_dir, sizeof(config_dir));
+    if (!config_dir[0]) {
+        return;
+    }
     char hooks_dir[CLI_BUF_1K];
-    snprintf(hooks_dir, sizeof(hooks_dir), "%s/.claude/hooks", home);
+    snprintf(hooks_dir, sizeof(hooks_dir), "%s/hooks", config_dir);
     cbm_mkdir_p(hooks_dir, CLI_OCTAL_PERM);
 
     char script_path[CLI_BUF_1K];
-    snprintf(script_path, sizeof(script_path), "%s/cbm-session-reminder", hooks_dir);
+    snprintf(script_path, sizeof(script_path), "%s/" CMM_SESSION_REMINDER_SCRIPT, hooks_dir);
 
     FILE *f = fopen(script_path, "w");
     if (!f) {
@@ -1706,11 +1943,12 @@ static void cbm_install_session_reminder_script(const char *home) {
            "1. ALWAYS use codebase-memory-mcp tools FIRST for ANY code exploration:\n"
            "   - search_graph(name_pattern/label/qn_pattern) to find functions/classes/routes\n"
            "   - trace_path(function_name, mode=calls|data_flow|cross_service) for call chains\n"
-           "   - get_code_snippet(qualified_name) to read source (NOT Read/cat)\n"
+           "   - get_code_snippet(qualified_name) for exact symbol source (precise ranges)\n"
            "   - query_graph(query) for complex Cypher patterns\n"
            "   - get_architecture(aspects) for project structure\n"
            "   - search_code(pattern) for text search (graph-augmented grep)\n"
-           "2. Fall back to Grep/Glob/Read ONLY for text content, config values, non-code files.\n"
+           "2. Use Grep/Glob/Read freely for text, configs, non-code files, and\n"
+           "   always Read a file before editing it.\n"
            "3. If a project is not indexed yet, run index_repository FIRST.\n"
            "REMINDER\n");
 #ifndef _WIN32
@@ -1724,10 +1962,14 @@ static void cbm_install_session_reminder_script(const char *home) {
 
 static int cbm_upsert_session_hooks(const char *settings_path) {
     static const char *matchers[] = {"startup", "resume", "clear", "compact"};
+    char command[CLI_BUF_1K];
+    cbm_resolve_hook_command(CMM_SESSION_REMINDER_SCRIPT, command, sizeof(command));
     int rc = 0;
     for (int i = 0; i < NUM_DIRS; i++) {
-        if (upsert_hooks_json((hooks_upsert_args_t){settings_path, "SessionStart", matchers[i],
-                                                    CMM_SESSION_COMMAND}) != 0) {
+        if (upsert_hooks_json((hooks_upsert_args_t){.settings_path = settings_path,
+                                                    .hook_event = "SessionStart",
+                                                    .matcher_str = matchers[i],
+                                                    .command_str = command}) != 0) {
             rc = CLI_ERR;
         }
     }
@@ -1738,27 +1980,62 @@ static int cbm_remove_session_hooks(const char *settings_path) {
     static const char *matchers[] = {"startup", "resume", "clear", "compact"};
     int rc = 0;
     for (int i = 0; i < NUM_DIRS; i++) {
-        if (remove_hooks_json((hooks_remove_args_t){settings_path, "SessionStart", matchers[i]}) !=
-            0) {
+        if (remove_hooks_json((hooks_remove_args_t){.settings_path = settings_path,
+                                                    .hook_event = "SessionStart",
+                                                    .matcher_str = matchers[i]}) != 0) {
             rc = CLI_ERR;
         }
     }
     return rc;
 }
 
-#define GEMINI_HOOK_MATCHER "google_search|read_file|grep_search"
+/* Matcher excludes read_file for consistency with the Claude fix: the hook
+ * is an advisory reminder, not a gate over the agent's file reads. */
+#define GEMINI_HOOK_MATCHER "google_search|grep_search"
 #define GEMINI_HOOK_COMMAND                                               \
     "echo 'Reminder: prefer codebase-memory-mcp search_graph/trace_path/" \
     "get_code_snippet over grep/file search for code discovery.' >&2"
 
 int cbm_upsert_gemini_hooks(const char *settings_path) {
-    return upsert_hooks_json((hooks_upsert_args_t){settings_path, "BeforeTool", GEMINI_HOOK_MATCHER,
-                                                   GEMINI_HOOK_COMMAND});
+    return upsert_hooks_json((hooks_upsert_args_t){
+        .settings_path = settings_path,
+        .hook_event = "BeforeTool",
+        .matcher_str = GEMINI_HOOK_MATCHER,
+        .command_str = GEMINI_HOOK_COMMAND,
+        .old_matchers = cmm_gemini_old_matchers,
+    });
 }
 
 int cbm_remove_gemini_hooks(const char *settings_path) {
-    return remove_hooks_json(
-        (hooks_remove_args_t){settings_path, "BeforeTool", GEMINI_HOOK_MATCHER});
+    return remove_hooks_json((hooks_remove_args_t){
+        .settings_path = settings_path,
+        .hook_event = "BeforeTool",
+        .matcher_str = GEMINI_HOOK_MATCHER,
+        .old_matchers = cmm_gemini_old_matchers,
+    });
+}
+
+/* Gemini CLI / Antigravity SessionStart reminder. settings.json uses the same
+ * hooks.<Event>[].hooks[] JSON shape as Claude, so it reuses upsert_hooks_json.
+ * The SessionStart matcher is advisory in Gemini (it does not filter lifecycle
+ * sources), so a single "startup" entry fires on startup/resume/clear. The
+ * command's stdout is injected as session context. (Gemini/Antigravity parity
+ * with the Claude/Codex SessionStart reminder.) */
+int cbm_upsert_gemini_session_hooks(const char *settings_path) {
+    return upsert_hooks_json((hooks_upsert_args_t){
+        .settings_path = settings_path,
+        .hook_event = "SessionStart",
+        .matcher_str = "startup",
+        .command_str = CMM_SESSION_REMINDER_CMD,
+    });
+}
+
+int cbm_remove_gemini_session_hooks(const char *settings_path) {
+    return remove_hooks_json((hooks_remove_args_t){
+        .settings_path = settings_path,
+        .hook_event = "SessionStart",
+        .matcher_str = "startup",
+    });
 }
 
 /* ── PATH management ──────────────────────────────────────────── */
@@ -1768,8 +2045,19 @@ int cbm_ensure_path(const char *bin_dir, const char *rc_file, bool dry_run) {
         return CLI_ERR;
     }
 
+    /* fish uses a different syntax than POSIX shells: `export PATH="...:$PATH"`
+     * is a syntax error in fish and breaks config.fish (#319). When the target
+     * is a fish config, emit the fish-native `fish_add_path` (idempotent,
+     * prepends only if absent) instead. */
+    size_t rc_len = strlen(rc_file);
+    bool is_fish = rc_len >= CBM_SZ_5 && strcmp(rc_file + rc_len - CBM_SZ_5, ".fish") == 0;
+
     char line[CLI_BUF_1K];
-    snprintf(line, sizeof(line), "export PATH=\"%s:$PATH\"", bin_dir);
+    if (is_fish) {
+        snprintf(line, sizeof(line), "fish_add_path %s", bin_dir);
+    } else {
+        snprintf(line, sizeof(line), "export PATH=\"%s:$PATH\"", bin_dir);
+    }
 
     /* Check if already present in rc file */
     FILE *f = fopen(rc_file, "r");
@@ -2601,7 +2889,9 @@ static void print_detected_agents(const cbm_detected_agents_t *a) {
         {a->aider, "Aider"},
         {a->kilocode, "KiloCode"},
         {a->vscode, "VS-Code"},
+        {a->cursor, "Cursor"},
         {a->openclaw, "OpenClaw"},
+        {a->kiro, "Kiro"},
     };
     printf("Detected agents:");
     bool any = false;
@@ -2618,10 +2908,72 @@ static void print_detected_agents(const cbm_detected_agents_t *a) {
 }
 
 /* Install Claude Code-specific configs (skills, MCP, hooks). */
+/* ── Install plan recorder (issue #388) ────────────────────────────
+ * When g_install_plan != NULL, the install path runs as a dry-run and each
+ * write site records its planned target HERE — at the same point it would
+ * perform the write — so the emitted plan cannot drift from actual install
+ * behavior (it is the same code path with mutations disabled). */
+typedef struct {
+    char agent[CLI_BUF_32];
+    char kind[CLI_BUF_32]; /* mcp_config | instructions | skills | hook */
+    char path[CLI_BUF_1K];
+} cbm_plan_entry_t;
+
+typedef struct {
+    cbm_plan_entry_t *items;
+    int count;
+    int cap;
+} cbm_install_plan_t;
+
+static cbm_install_plan_t *g_install_plan = NULL;
+
+static void plan_record(const char *agent, const char *kind, const char *path) {
+    if (!g_install_plan || !path || !path[0]) {
+        return;
+    }
+    cbm_install_plan_t *pl = g_install_plan;
+    if (pl->count >= pl->cap) {
+        int ncap = pl->cap ? pl->cap * 2 : CLI_BUF_16;
+        cbm_plan_entry_t *ni = realloc(pl->items, (size_t)ncap * sizeof(*ni));
+        if (!ni) {
+            return;
+        }
+        pl->items = ni;
+        pl->cap = ncap;
+    }
+    cbm_plan_entry_t *e = &pl->items[pl->count++];
+    snprintf(e->agent, sizeof(e->agent), "%s", agent);
+    snprintf(e->kind, sizeof(e->kind), "%s", kind);
+    snprintf(e->path, sizeof(e->path), "%s", path);
+}
+
 static void install_claude_code_config(const char *home, const char *binary_path, bool force,
                                        bool dry_run) {
+    char config_dir[CLI_BUF_1K];
+    cbm_claude_config_dir(home, config_dir, sizeof(config_dir));
+    char user_root[CLI_BUF_1K];
+    cbm_claude_user_root(home, user_root, sizeof(user_root));
+
     char skills_dir[CLI_BUF_1K];
-    snprintf(skills_dir, sizeof(skills_dir), "%s/.claude/skills", home);
+    snprintf(skills_dir, sizeof(skills_dir), "%s/skills", config_dir);
+
+    /* Plan mode: record the planned writes and return without mutating (#388). */
+    if (g_install_plan) {
+        char p[CLI_BUF_1K];
+        plan_record("Claude Code", "skills", skills_dir);
+        snprintf(p, sizeof(p), "%s/.mcp.json", config_dir);
+        plan_record("Claude Code", "mcp_config", p);
+        snprintf(p, sizeof(p), "%s/.claude.json", user_root);
+        plan_record("Claude Code", "mcp_config", p);
+        snprintf(p, sizeof(p), "%s/settings.json", config_dir);
+        plan_record("Claude Code", "mcp_config", p);
+        snprintf(p, sizeof(p), "%s/hooks/%s", config_dir, CMM_HOOK_GATE_SCRIPT);
+        plan_record("Claude Code", "hook", p);
+        snprintf(p, sizeof(p), "%s/hooks/%s", config_dir, CMM_SESSION_REMINDER_SCRIPT);
+        plan_record("Claude Code", "hook", p);
+        return;
+    }
+
     printf("Claude Code:\n");
 
     int skill_count = cbm_install_skills(skills_dir, force, dry_run);
@@ -2632,29 +2984,43 @@ static void install_claude_code_config(const char *home, const char *binary_path
     }
 
     char mcp_path[CLI_BUF_1K];
-    snprintf(mcp_path, sizeof(mcp_path), "%s/.claude/.mcp.json", home);
+    snprintf(mcp_path, sizeof(mcp_path), "%s/.mcp.json", config_dir);
     if (!dry_run) {
         cbm_install_editor_mcp(binary_path, mcp_path);
     }
     printf("  mcp: %s\n", mcp_path);
 
     char mcp_path2[CLI_BUF_1K];
-    snprintf(mcp_path2, sizeof(mcp_path2), "%s/.claude.json", home);
+    snprintf(mcp_path2, sizeof(mcp_path2), "%s/.claude.json", user_root);
     if (!dry_run) {
         cbm_install_editor_mcp(binary_path, mcp_path2);
     }
     printf("  mcp: %s\n", mcp_path2);
 
     char settings_path[CLI_BUF_1K];
-    snprintf(settings_path, sizeof(settings_path), "%s/.claude/settings.json", home);
+    snprintf(settings_path, sizeof(settings_path), "%s/settings.json", config_dir);
     if (!dry_run) {
         cbm_upsert_claude_hooks(settings_path);
-        cbm_install_hook_gate_script(home);
+        cbm_install_hook_gate_script(home, binary_path);
         cbm_install_session_reminder_script(home);
         cbm_upsert_session_hooks(settings_path);
     }
-    printf("  hooks: PreToolUse (code discovery gate)\n");
+    printf("  hooks: PreToolUse (Grep/Glob search-graph augmenter, non-blocking)\n");
     printf("  hooks: SessionStart (MCP usage reminder on startup/resume/clear/compact)\n");
+
+    /* Migration nudge: when CLAUDE_CONFIG_DIR is set and a legacy ~/.claude tree
+     * still exists, mention it so users can clean up stale artifacts. */
+    if (home && home[0]) {
+        char legacy_dir[CLI_BUF_1K];
+        snprintf(legacy_dir, sizeof(legacy_dir), "%s/.claude", home);
+        if (strcmp(legacy_dir, config_dir) != 0 && dir_exists(legacy_dir)) {
+            (void)fprintf(stderr,
+                          "  note: $CLAUDE_CONFIG_DIR=%s used; legacy %s still exists.\n"
+                          "        Remove stale {skills,hooks,settings.json,.mcp.json} there if "
+                          "no longer needed.\n",
+                          config_dir, legacy_dir);
+        }
+    }
 }
 
 /* Install MCP config + optional instructions for a generic agent. */
@@ -2662,6 +3028,14 @@ static void install_generic_agent_config(const char *label, const char *binary_p
                                          const char *config_path, const char *instr_path,
                                          bool dry_run,
                                          int (*install_mcp)(const char *, const char *)) {
+    /* Plan mode: record planned writes, mutate nothing (#388). */
+    if (g_install_plan) {
+        plan_record(label, "mcp_config", config_path);
+        if (instr_path) {
+            plan_record(label, "instructions", instr_path);
+        }
+        return;
+    }
     printf("%s:\n", label);
     if (!dry_run) {
         install_mcp(binary_path, config_path);
@@ -2684,10 +3058,15 @@ static void install_gemini_config(const char *home, const char *binary_path, boo
     snprintf(ip, sizeof(ip), "%s/.gemini/GEMINI.md", home);
     install_generic_agent_config("Gemini CLI", binary_path, cp, ip, dry_run,
                                  cbm_install_editor_mcp);
+    if (g_install_plan) {
+        plan_record("Gemini CLI", "hook", cp); /* BeforeTool + SessionStart in settings.json */
+        return;
+    }
     if (!dry_run) {
         cbm_upsert_gemini_hooks(cp);
+        cbm_upsert_gemini_session_hooks(cp);
     }
-    printf("  hooks: BeforeTool (grep/file search reminder)\n");
+    printf("  hooks: BeforeTool + SessionStart (codebase-memory-mcp reminder)\n");
 }
 
 static void install_cli_agent_configs(const cbm_detected_agents_t *agents, const char *home,
@@ -2699,6 +3078,14 @@ static void install_cli_agent_configs(const cbm_detected_agents_t *agents, const
         snprintf(ip, sizeof(ip), "%s/.codex/AGENTS.md", home);
         install_generic_agent_config("Codex CLI", binary_path, cp, ip, dry_run,
                                      cbm_upsert_codex_mcp);
+        if (g_install_plan) {
+            plan_record("Codex CLI", "hook", cp);
+        } else {
+            if (!dry_run) {
+                cbm_upsert_codex_hooks(cp);
+            }
+            printf("  hooks: SessionStart (codebase-memory-mcp reminder)\n");
+        }
     }
     if (agents->gemini) {
         install_gemini_config(home, binary_path, dry_run);
@@ -2714,19 +3101,43 @@ static void install_cli_agent_configs(const cbm_detected_agents_t *agents, const
     if (agents->antigravity) {
         char cp[CLI_BUF_1K];
         char ip[CLI_BUF_1K];
-        snprintf(cp, sizeof(cp), "%s/.gemini/antigravity/mcp_config.json", home);
-        snprintf(ip, sizeof(ip), "%s/.gemini/antigravity/AGENTS.md", home);
+        /* MCP config is the SHARED Antigravity config (CLI + IDE), not a
+         * per-tool file (2026 unification). */
+        snprintf(cp, sizeof(cp), "%s/.gemini/config/mcp_config.json", home);
+        snprintf(ip, sizeof(ip), "%s/.gemini/antigravity-cli/AGENTS.md", home);
+        if (!dry_run && !g_install_plan) {
+            char cfg_dir[CLI_BUF_1K];
+            snprintf(cfg_dir, sizeof(cfg_dir), "%s/.gemini/config", home);
+            cbm_mkdir_p(cfg_dir, CLI_OCTAL_PERM);
+        }
         install_generic_agent_config("Antigravity", binary_path, cp, ip, dry_run,
                                      cbm_upsert_antigravity_mcp);
+        /* Antigravity CLI is Gemini-lineage and keeps a settings.json under
+         * ~/.gemini/antigravity-cli/; install the SessionStart reminder there
+         * using the shared Gemini hook JSON schema. */
+        char sp[CLI_BUF_1K];
+        snprintf(sp, sizeof(sp), "%s/.gemini/antigravity-cli/settings.json", home);
+        if (g_install_plan) {
+            plan_record("Antigravity", "hook", sp);
+        } else {
+            if (!dry_run) {
+                cbm_upsert_gemini_session_hooks(sp);
+            }
+            printf("  hooks: SessionStart (codebase-memory-mcp reminder)\n");
+        }
     }
     if (agents->aider) {
         char ip[CLI_BUF_1K];
         snprintf(ip, sizeof(ip), "%s/CONVENTIONS.md", home);
-        printf("Aider:\n");
-        if (!dry_run) {
-            cbm_upsert_instructions(ip, agent_instructions_content);
+        if (g_install_plan) {
+            plan_record("Aider", "instructions", ip);
+        } else {
+            printf("Aider:\n");
+            if (!dry_run) {
+                cbm_upsert_instructions(ip, agent_instructions_content);
+            }
+            printf("  instructions: %s\n", ip);
         }
-        printf("  instructions: %s\n", ip);
     }
 }
 
@@ -2771,10 +3182,27 @@ static void install_editor_agent_configs(const cbm_detected_agents_t *agents, co
         install_generic_agent_config("VS Code", binary_path, cp, NULL, dry_run,
                                      cbm_install_vscode_mcp);
     }
+    if (agents->cursor) {
+        char cp[CLI_BUF_1K];
+        snprintf(cp, sizeof(cp), "%s/.cursor/mcp.json", home);
+        install_generic_agent_config("Cursor", binary_path, cp, NULL, dry_run,
+                                     cbm_install_editor_mcp);
+    }
     if (agents->openclaw) {
         char cp[CLI_BUF_1K];
         snprintf(cp, sizeof(cp), "%s/.openclaw/openclaw.json", home);
         install_generic_agent_config("OpenClaw", binary_path, cp, NULL, dry_run,
+                                     cbm_install_editor_mcp);
+    }
+    if (agents->kiro) {
+        char cp[CLI_BUF_1K];
+        char sd[CLI_BUF_1K];
+        snprintf(cp, sizeof(cp), "%s/.kiro/settings/mcp.json", home);
+        snprintf(sd, sizeof(sd), "%s/.kiro/settings", home);
+        if (!dry_run) {
+            cbm_mkdir_p(sd, CLI_OCTAL_PERM);
+        }
+        install_generic_agent_config("Kiro", binary_path, cp, NULL, dry_run,
                                      cbm_install_editor_mcp);
     }
 }
@@ -2782,7 +3210,9 @@ static void install_editor_agent_configs(const cbm_detected_agents_t *agents, co
 static void cbm_install_agent_configs(const char *home, const char *binary_path, bool force,
                                       bool dry_run) {
     cbm_detected_agents_t agents = cbm_detect_agents(home);
-    print_detected_agents(&agents);
+    if (!g_install_plan) {
+        print_detected_agents(&agents);
+    }
 
     if (agents.claude_code) {
         install_claude_code_config(home, binary_path, force, dry_run);
@@ -2841,10 +3271,88 @@ static void cbm_detect_self_path(char *buf, size_t buf_sz, const char *home) {
     }
 }
 
+/* Build the agent.install.plan.v1 receipt (#388): a machine-readable list of
+ * the config / instruction / hook files `install` WOULD write, produced by
+ * running the real install dispatch in record-only mode (no mutation, no
+ * network). Returns a heap JSON string (caller frees) or NULL. */
+char *cbm_build_install_plan_json(const char *home, const char *binary_path) {
+    if (!home || !binary_path) {
+        return NULL;
+    }
+
+    /* Same code path as a real install, but mutations disabled and every write
+     * site records into `plan` — so the receipt cannot drift from behavior. */
+    cbm_install_plan_t plan = {0};
+    g_install_plan = &plan;
+    cbm_install_agent_configs(home, binary_path, false, true);
+    g_install_plan = NULL;
+
+    cbm_detected_agents_t det = cbm_detect_agents(home);
+    struct {
+        bool flag;
+        const char *name;
+    } names[] = {
+        {det.claude_code, "claude-code"},
+        {det.codex, "codex"},
+        {det.gemini, "gemini"},
+        {det.zed, "zed"},
+        {det.opencode, "opencode"},
+        {det.antigravity, "antigravity"},
+        {det.aider, "aider"},
+        {det.kilocode, "kilocode"},
+        {det.vscode, "vscode"},
+        {det.cursor, "cursor"},
+        {det.openclaw, "openclaw"},
+        {det.kiro, "kiro"},
+    };
+
+    yyjson_mut_doc *doc = yyjson_mut_doc_new(NULL);
+    yyjson_mut_val *root = yyjson_mut_obj(doc);
+    yyjson_mut_doc_set_root(doc, root);
+    yyjson_mut_obj_add_str(doc, root, "type", "agent.install.plan.v1");
+
+    yyjson_mut_val *agents = yyjson_mut_arr(doc);
+    for (size_t i = 0; i < sizeof(names) / sizeof(names[0]); i++) {
+        if (names[i].flag) {
+            yyjson_mut_arr_add_str(doc, agents, names[i].name);
+        }
+    }
+    yyjson_mut_obj_add_val(doc, root, "agents_detected", agents);
+
+    yyjson_mut_val *configs = yyjson_mut_arr(doc);
+    yyjson_mut_val *instrs = yyjson_mut_arr(doc);
+    yyjson_mut_val *hooks = yyjson_mut_arr(doc);
+    for (int i = 0; i < plan.count; i++) {
+        cbm_plan_entry_t *e = &plan.items[i];
+        if (strcmp(e->kind, "mcp_config") == 0) {
+            yyjson_mut_arr_add_strcpy(doc, configs, e->path);
+        } else if (strcmp(e->kind, "hook") == 0) {
+            yyjson_mut_val *h = yyjson_mut_obj(doc);
+            yyjson_mut_obj_add_strcpy(doc, h, "agent", e->agent);
+            yyjson_mut_obj_add_strcpy(doc, h, "path", e->path);
+            yyjson_mut_arr_add_val(hooks, h);
+        } else {
+            yyjson_mut_arr_add_strcpy(doc, instrs, e->path);
+        }
+    }
+    yyjson_mut_obj_add_val(doc, root, "config_files_planned", configs);
+    yyjson_mut_obj_add_val(doc, root, "instruction_files_planned", instrs);
+    yyjson_mut_obj_add_val(doc, root, "hooks_planned", hooks);
+    yyjson_mut_obj_add_bool(doc, root, "writes_started", false);
+    yyjson_mut_obj_add_bool(doc, root, "network_after_install", false);
+    yyjson_mut_obj_add_str(doc, root, "next_safe_command", "codebase-memory-mcp install -y");
+
+    char *json = yyjson_mut_write(doc, YYJSON_WRITE_PRETTY, NULL);
+    yyjson_mut_doc_free(doc);
+    free(plan.items);
+    return json; /* malloc'd; caller frees */
+}
+
 int cbm_cmd_install(int argc, char **argv) {
     parse_auto_answer(argc, argv);
     bool dry_run = false;
     bool force = false;
+    bool plan = false;
     for (int i = 0; i < argc; i++) {
         if (strcmp(argv[i], "--dry-run") == 0) {
             dry_run = true;
@@ -2852,12 +3360,31 @@ int cbm_cmd_install(int argc, char **argv) {
         if (strcmp(argv[i], "--force") == 0) {
             force = true;
         }
+        if (strcmp(argv[i], "--plan") == 0) {
+            plan = true;
+        }
     }
 
     const char *home = cbm_get_home_dir();
     if (!home) {
         (void)fprintf(stderr, "error: HOME not set (use USERPROFILE on Windows)\n");
         return CLI_TRUE;
+    }
+
+    /* --plan: emit the machine-readable install receipt and exit WITHOUT
+     * mutating anything (no config writes, no index deletion, no network) so
+     * an agent can inspect exactly what install would touch first (#388). */
+    if (plan) {
+        char self_path[CLI_BUF_1K] = {0};
+        cbm_detect_self_path(self_path, sizeof(self_path), home);
+        char *json = cbm_build_install_plan_json(home, self_path);
+        if (!json) {
+            (void)fprintf(stderr, "error: failed to build install plan\n");
+            return CLI_TRUE;
+        }
+        printf("%s\n", json);
+        free(json);
+        return 0;
     }
 
     printf("codebase-memory-mcp install %s\n\n", CBM_VERSION);
@@ -2929,26 +3456,31 @@ int cbm_cmd_install(int argc, char **argv) {
 
 /* Remove Claude Code agent configs. */
 static void uninstall_claude_code(const char *home, bool dry_run) {
+    char config_dir[CLI_BUF_1K];
+    cbm_claude_config_dir(home, config_dir, sizeof(config_dir));
+    char user_root[CLI_BUF_1K];
+    cbm_claude_user_root(home, user_root, sizeof(user_root));
+
     char skills_dir[CLI_BUF_1K];
-    snprintf(skills_dir, sizeof(skills_dir), "%s/.claude/skills", home);
+    snprintf(skills_dir, sizeof(skills_dir), "%s/skills", config_dir);
     int removed = cbm_remove_skills(skills_dir, dry_run);
     printf("Claude Code: removed %d skill(s)\n", removed);
 
     char mcp_path[CLI_BUF_1K];
-    snprintf(mcp_path, sizeof(mcp_path), "%s/.claude/.mcp.json", home);
+    snprintf(mcp_path, sizeof(mcp_path), "%s/.mcp.json", config_dir);
     if (!dry_run) {
         cbm_remove_editor_mcp(mcp_path);
     }
     printf("  removed MCP config entry\n");
 
     char mcp_path2[CLI_BUF_1K];
-    snprintf(mcp_path2, sizeof(mcp_path2), "%s/.claude.json", home);
+    snprintf(mcp_path2, sizeof(mcp_path2), "%s/.claude.json", user_root);
     if (!dry_run) {
         cbm_remove_editor_mcp(mcp_path2);
     }
 
     char settings_path[CLI_BUF_1K];
-    snprintf(settings_path, sizeof(settings_path), "%s/.claude/settings.json", home);
+    snprintf(settings_path, sizeof(settings_path), "%s/settings.json", config_dir);
     if (!dry_run) {
         cbm_remove_claude_hooks(settings_path);
         cbm_remove_session_hooks(settings_path);
@@ -2989,6 +3521,7 @@ static void uninstall_gemini_config(const char *home, bool dry_run) {
     if (!dry_run) {
         cbm_remove_editor_mcp(cp);
         cbm_remove_gemini_hooks(cp);
+        cbm_remove_gemini_session_hooks(cp);
         cbm_remove_instructions(ip);
     }
     printf("Gemini CLI: removed MCP config + hooks + instructions\n");
@@ -3003,6 +3536,9 @@ static void uninstall_cli_agents(const cbm_detected_agents_t *agents, const char
         snprintf(ip, sizeof(ip), "%s/.codex/AGENTS.md", home);
         uninstall_agent_mcp_instr((mcp_uninstall_args_t){"Codex CLI", cp, ip}, dry_run,
                                   cbm_remove_codex_mcp);
+        if (!dry_run) {
+            cbm_remove_codex_hooks(cp);
+        }
     }
     if (agents->gemini) {
         uninstall_gemini_config(home, dry_run);
@@ -3018,10 +3554,15 @@ static void uninstall_cli_agents(const cbm_detected_agents_t *agents, const char
     if (agents->antigravity) {
         char cp[CLI_BUF_1K];
         char ip[CLI_BUF_1K];
-        snprintf(cp, sizeof(cp), "%s/.gemini/antigravity/mcp_config.json", home);
-        snprintf(ip, sizeof(ip), "%s/.gemini/antigravity/AGENTS.md", home);
+        snprintf(cp, sizeof(cp), "%s/.gemini/config/mcp_config.json", home);
+        snprintf(ip, sizeof(ip), "%s/.gemini/antigravity-cli/AGENTS.md", home);
         uninstall_agent_mcp_instr((mcp_uninstall_args_t){"Antigravity", cp, ip}, dry_run,
                                   cbm_remove_antigravity_mcp);
+        if (!dry_run) {
+            char sp[CLI_BUF_1K];
+            snprintf(sp, sizeof(sp), "%s/.gemini/antigravity-cli/settings.json", home);
+            cbm_remove_gemini_session_hooks(sp);
+        }
     }
     if (agents->aider) {
         char ip[CLI_BUF_1K];
@@ -3075,10 +3616,22 @@ static void uninstall_editor_agents(const cbm_detected_agents_t *agents, const c
         uninstall_agent_mcp_instr((mcp_uninstall_args_t){"VS Code", cp, NULL}, dry_run,
                                   cbm_remove_vscode_mcp);
     }
+    if (agents->cursor) {
+        char cp[CLI_BUF_1K];
+        snprintf(cp, sizeof(cp), "%s/.cursor/mcp.json", home);
+        uninstall_agent_mcp_instr((mcp_uninstall_args_t){"Cursor", cp, NULL}, dry_run,
+                                  cbm_remove_editor_mcp);
+    }
     if (agents->openclaw) {
         char cp[CLI_BUF_1K];
         snprintf(cp, sizeof(cp), "%s/.openclaw/openclaw.json", home);
         uninstall_agent_mcp_instr((mcp_uninstall_args_t){"OpenClaw", cp, NULL}, dry_run,
+                                  cbm_remove_editor_mcp);
+    }
+    if (agents->kiro) {
+        char cp[CLI_BUF_1K];
+        snprintf(cp, sizeof(cp), "%s/.kiro/settings/mcp.json", home);
+        uninstall_agent_mcp_instr((mcp_uninstall_args_t){"Kiro", cp, NULL}, dry_run,
                                   cbm_remove_editor_mcp);
     }
 }
@@ -3208,8 +3761,13 @@ static void build_update_url(char *url, int url_sz, const char *os, const char *
     if (!base_url || !base_url[0]) {
         base_url = "https://github.com/DeusData/codebase-memory-mcp/releases/latest/download";
     }
-    snprintf(url, url_sz, "%s/codebase-memory-mcp-%s%s-%s.%s", base_url, want_ui ? "ui-" : "", os,
-             arch, ext);
+    /* Linux ships a fully-static "-portable" build; the standard linux binary
+     * dynamically links glibc 2.38+ and fails on older distros. macOS/Windows
+     * have no such variant. Keep in sync with install.sh / install.js / pypi
+     * _cli.py. */
+    const char *portable = (strcmp(os, "linux") == 0) ? "-portable" : "";
+    snprintf(url, url_sz, "%s/codebase-memory-mcp-%s%s-%s%s.%s", base_url, want_ui ? "ui-" : "", os,
+             arch, portable, ext);
 }
 
 /* Prompt to delete existing indexes. Returns 0 to continue, 1 to abort. */
@@ -3248,8 +3806,10 @@ static int download_verify_install(const char *url, const char *ext, const char 
     }
 
     char archive_name[CLI_BUF_256];
-    snprintf(archive_name, sizeof(archive_name), "codebase-memory-mcp-%s%s-%s.%s",
-             want_ui ? "ui-" : "", os, arch, ext);
+    /* Must match build_update_url: linux uses the static "-portable" asset. */
+    const char *portable = (strcmp(os, "linux") == 0) ? "-portable" : "";
+    snprintf(archive_name, sizeof(archive_name), "codebase-memory-mcp-%s%s-%s%s.%s",
+             want_ui ? "ui-" : "", os, arch, portable, ext);
     int crc = verify_download_checksum(tmp_archive, archive_name);
     if (crc == CLI_TRUE) {
         cbm_unlink(tmp_archive);

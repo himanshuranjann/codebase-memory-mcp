@@ -168,11 +168,15 @@ typedef struct {
 typedef struct {
     const char *label;
     int count;
+    char **properties; /* distinct property keys for this label (base + JSON) */
+    int property_count;
 } cbm_label_count_t;
 
 typedef struct {
     const char *type;
     int count;
+    char **properties; /* distinct property keys for this edge type (base + JSON) */
+    int property_count;
 } cbm_type_count_t;
 
 typedef struct {
@@ -250,6 +254,15 @@ int cbm_store_create_indexes(cbm_store_t *s);
 
 /* Force WAL checkpoint + PRAGMA optimize. */
 int cbm_store_checkpoint(cbm_store_t *s);
+
+/* Resolve the mmap_size pragma value applied to on-disk stores from the
+ * CBM_SQLITE_MMAP_SIZE environment variable. Defaults to 67108864 (64 MB)
+ * when the variable is unset, malformed, or partially numeric. Negative
+ * values clamp to 0 (which disables mmap and reverts to read()/pread()
+ * I/O — recoverable SQLITE_IOERR instead of SIGBUS when concurrent
+ * processes truncate the DB file under live mappings). Exposed for
+ * testability. */
+int64_t cbm_store_resolve_mmap_size(void);
 
 /* ── Dump / Restore ─────────────────────────────────────────────── */
 
@@ -417,6 +430,11 @@ int cbm_deduplicate_hops(const cbm_node_hop_t *hops, int hop_count, cbm_node_hop
 
 int cbm_store_get_schema(cbm_store_t *s, const char *project, cbm_schema_info_t *out);
 
+/* Like cbm_store_get_schema but skips per-label/per-type JSON property-key
+ * discovery (json_each scans over every row) — for callers that only need
+ * label/type counts, e.g. get_architecture. */
+int cbm_store_get_schema_counts(cbm_store_t *s, const char *project, cbm_schema_info_t *out);
+
 /* Free a schema info's allocated memory. */
 void cbm_store_schema_free(cbm_schema_info_t *out);
 
@@ -578,7 +596,7 @@ const char *cbm_qn_to_top_package(const char *qn);
 bool cbm_is_test_file_path(const char *fp);
 int cbm_store_find_architecture_docs(cbm_store_t *s, const char *project, char ***out, int *count);
 
-/* ── Louvain algorithm ─────────────────────────────────────────── */
+/* ── Community detection (Leiden) ──────────────────────────────── */
 
 typedef struct {
     int64_t src;
@@ -590,6 +608,16 @@ typedef struct {
     int community;
 } cbm_louvain_result_t;
 
+/* Multi-level Leiden community detection (Traag, Waltman & van Eck 2019,
+ * arXiv:1810.08473): local moving + refinement + aggregation, repeated until
+ * the partition can no longer be coarsened. Refinement guarantees every
+ * reported community is internally connected. The resolution parameter
+ * controls granularity (higher -> more, smaller communities); 1.0 is standard.
+ * Allocates *out (length *out_count == node_count); the caller frees it. */
+int cbm_leiden(const int64_t *nodes, int node_count, const cbm_louvain_edge_t *edges,
+               int edge_count, double resolution, cbm_louvain_result_t **out, int *out_count);
+
+/* Convenience wrapper: cbm_leiden with resolution 1.0. */
 int cbm_louvain(const int64_t *nodes, int node_count, const cbm_louvain_edge_t *edges,
                 int edge_count, cbm_louvain_result_t **out, int *out_count);
 

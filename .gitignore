@@ -41,6 +41,9 @@ Thumbs.db
 memory/
 reference/
 
+# Local-only scratch / session notes (never pushed)
+private/
+
 # Build artifacts
 build/
 node_modules/

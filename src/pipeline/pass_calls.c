@@ -15,6 +15,7 @@ enum { PC_RING = 4, PC_RING_MASK = 3, PC_SIG_SCAN = 15, PC_REGEX_GRP = 2 };
 #include "pipeline/pipeline.h"
 #include <stdint.h>
 #include "pipeline/pipeline_internal.h"
+#include "pipeline/lsp_resolve.h"
 #include "graph_buffer/graph_buffer.h"
 #include "foundation/log.h"
 #include "foundation/compat.h"
@@ -45,7 +46,9 @@ static char *read_file(const char *path, int *out_len) {
         return NULL;
     }
 
-    char *buf = malloc(size + SKIP_ONE);
+    /* +pad: tree-sitter lexer lookahead reads past EOF; keep it in-bounds */
+    enum { CBM_TS_LOOKAHEAD_PAD = 16 };
+    char *buf = malloc((size_t)size + CBM_TS_LOOKAHEAD_PAD);
     if (!buf) {
         (void)fclose(f);
         return NULL;
@@ -57,7 +60,7 @@ static char *read_file(const char *path, int *out_len) {
     if (nread > (size_t)size) {
         nread = (size_t)size;
     }
-    buf[nread] = '\0';
+    memset(buf + nread, 0, CBM_TS_LOOKAHEAD_PAD);
     *out_len = (int)nread;
     return buf;
 }
@@ -190,10 +193,14 @@ static void handle_route_registration(cbm_pipeline_ctx_t *ctx, const CBMCall *ca
     snprintf(route_props, sizeof(route_props), "{\"method\":\"%s\"}", method ? method : "ANY");
     int64_t route_id = cbm_gbuf_upsert_node(ctx->gbuf, "Route", call->first_string_arg, route_qn,
                                             "", 0, 0, route_props);
+    char esc_cn[CBM_SZ_256]; /* sliced source text: escape quotes/newlines */
+    char esc_fa[CBM_SZ_256];
+    cbm_json_escape(esc_cn, sizeof(esc_cn), call->callee_name);
+    cbm_json_escape(esc_fa, sizeof(esc_fa), call->first_string_arg);
     char props[CBM_SZ_512];
     snprintf(props, sizeof(props),
-             "{\"callee\":\"%s\",\"url_path\":\"%s\",\"via\":\"route_registration\"}",
-             call->callee_name, call->first_string_arg);
+             "{\"callee\":\"%s\",\"url_path\":\"%s\",\"via\":\"route_registration\"}", esc_cn,
+             esc_fa);
     cbm_gbuf_insert_edge(ctx->gbuf, source_node->id, route_id, "CALLS", props);
     if (call->second_arg_name != NULL && call->second_arg_name[0] != '\0') {
         cbm_resolution_t hres = cbm_registry_resolve(ctx->registry, call->second_arg_name,
@@ -201,8 +208,11 @@ static void handle_route_registration(cbm_pipeline_ctx_t *ctx, const CBMCall *ca
         if (hres.qualified_name != NULL && hres.qualified_name[0] != '\0') {
             const cbm_gbuf_node_t *handler = cbm_gbuf_find_by_qn(ctx->gbuf, hres.qualified_name);
             if (handler != NULL) {
-                char hprops[CBM_SZ_256];
-                snprintf(hprops, sizeof(hprops), "{\"handler\":\"%s\"}", hres.qualified_name);
+                char hprops[CBM_SZ_1K]; /* must exceed escaped value + wrapper or snprintf cuts the
+                                           closing brace */
+                char esc_h[CBM_SZ_512];
+                cbm_json_escape(esc_h, sizeof(esc_h), hres.qualified_name);
+                snprintf(hprops, sizeof(hprops), "{\"handler\":\"%s\"}", esc_h);
                 cbm_gbuf_insert_edge(ctx->gbuf, handler->id, route_id, "HANDLES", hprops);
             }
         }
@@ -323,13 +333,34 @@ static const cbm_gbuf_node_t *calls_find_source(cbm_pipeline_ctx_t *ctx, const c
 }
 
 /* Resolve one call and emit the appropriate edge. Returns 1 if resolved, 0 if not. */
-static int resolve_single_call(cbm_pipeline_ctx_t *ctx, CBMCall *call, const char *rel,
+static int resolve_single_call(cbm_pipeline_ctx_t *ctx, CBMCall *call,
+                               const CBMResolvedCallArray *lsp_calls, const char *rel,
                                const char *module_qn, const char **imp_keys, const char **imp_vals,
                                int imp_count) {
     const cbm_gbuf_node_t *source_node = calls_find_source(ctx, rel, call->enclosing_func_qn);
     if (!source_node) {
         return 0;
     }
+
+    /* LSP-resolved calls take precedence over registry-textual matching. */
+    const CBMResolvedCall *lsp = cbm_pipeline_find_lsp_resolution(lsp_calls, call);
+    if (lsp) {
+        const cbm_gbuf_node_t *target_node =
+            cbm_pipeline_lsp_target_node(ctx->gbuf, ctx->project_name, lsp->callee_qn);
+        if (target_node && source_node->id != target_node->id) {
+            cbm_resolution_t res = {0};
+            /* Use the gbuf node's QN so downstream edge props show the canonical
+             * project-qualified form even when fallback prefixed the project. */
+            res.qualified_name = target_node->qualified_name;
+            res.confidence = lsp->confidence;
+            res.strategy = lsp->strategy;
+            res.candidate_count = 1;
+            emit_classified_edge(ctx, call, source_node, target_node, &res, module_qn, imp_keys,
+                                 imp_vals, imp_count);
+            return SKIP_ONE;
+        }
+    }
+
     cbm_resolution_t res = cbm_registry_resolve(ctx->registry, call->callee_name, module_qn,
                                                 imp_keys, imp_vals, imp_count);
     if (!res.qualified_name || res.qualified_name[0] == '\0') {
@@ -408,7 +439,8 @@ int cbm_pipeline_pass_calls(cbm_pipeline_ctx_t *ctx, const cbm_file_info_t *file
                 continue;
             }
             total_calls++;
-            if (resolve_single_call(ctx, call, rel, module_qn, imp_keys, imp_vals, imp_count)) {
+            if (resolve_single_call(ctx, call, &result->resolved_calls, rel, module_qn, imp_keys,
+                                    imp_vals, imp_count)) {
                 resolved++;
             } else {
                 unresolved++;

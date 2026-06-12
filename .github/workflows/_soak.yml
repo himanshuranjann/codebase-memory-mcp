@@ -49,7 +49,7 @@ jobs:
     runs-on: ${{ matrix.os }}
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
       - name: Install deps (Linux)
         if: startsWith(matrix.os, 'ubuntu')
         run: sudo apt-get update && sudo apt-get install -y zlib1g-dev python3 git
@@ -59,7 +59,7 @@ jobs:
         run: scripts/soak-test.sh build/c/codebase-memory-mcp ${{ inputs.duration_minutes }}
       - name: Upload metrics
         if: always()
-        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: soak-quick-${{ matrix.goos }}-${{ matrix.goarch }}
           path: soak-results/
@@ -69,8 +69,8 @@ jobs:
     runs-on: windows-latest
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-      - uses: msys2/setup-msys2@cafece8e6baf9247cf9b1bf95097b0b983cc558d # v2
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+      - uses: msys2/setup-msys2@e9898307ac31d1a803454791be09ab9973336e1c # v2
         with:
           msystem: CLANG64
           path-type: inherit
@@ -92,7 +92,7 @@ jobs:
           scripts/soak-test.sh "$BIN" ${{ inputs.duration_minutes }}
       - name: Upload metrics
         if: always()
-        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: soak-quick-windows-amd64
           path: soak-results/
@@ -127,7 +127,7 @@ jobs:
     runs-on: ${{ matrix.os }}
     timeout-minutes: 45
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
       - name: Install deps (Linux)
         if: startsWith(matrix.os, 'ubuntu')
         run: sudo apt-get update && sudo apt-get install -y zlib1g-dev python3 git
@@ -141,7 +141,7 @@ jobs:
         run: scripts/soak-test.sh build/c/codebase-memory-mcp 15
       - name: Upload metrics
         if: always()
-        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: soak-asan-${{ matrix.goos }}-${{ matrix.goarch }}
           path: soak-results/
@@ -152,8 +152,8 @@ jobs:
     runs-on: windows-latest
     timeout-minutes: 45
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-      - uses: msys2/setup-msys2@cafece8e6baf9247cf9b1bf95097b0b983cc558d # v2
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+      - uses: msys2/setup-msys2@e9898307ac31d1a803454791be09ab9973336e1c # v2
         with:
           msystem: CLANG64
           path-type: inherit
@@ -179,7 +179,7 @@ jobs:
           scripts/soak-test.sh "$BIN" 15
       - name: Upload metrics
         if: always()
-        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: soak-asan-windows-amd64
           path: soak-results/

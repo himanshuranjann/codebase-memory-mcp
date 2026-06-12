@@ -4,6 +4,7 @@
  * Covers: JSON-RPC parsing, MCP protocol, tool dispatch, tool handlers.
  */
 #include "../src/foundation/compat.h"
+#include "../src/foundation/compat_fs.h" /* cbm_unlink / cbm_rmdir */
 #include "test_framework.h"
 #include <mcp/mcp.h>
 #include <store/store.h>
@@ -60,6 +61,43 @@ TEST(jsonrpc_parse_tools_call) {
     ASSERT_EQ(req.id, 42);
     ASSERT_NOT_NULL(req.params_raw);
     cbm_jsonrpc_request_free(&req);
+    PASS();
+}
+
+/* issue #253: JSON-RPC 2.0 §4 permits string ids (Claude Desktop sends them
+ * for "initialize"). Previously strtol-coerced to 0; must be preserved. */
+TEST(jsonrpc_parse_string_id_issue253) {
+    const char *line = "{\"jsonrpc\":\"2.0\",\"id\":\"init-abc\",\"method\":\"initialize\"}";
+    cbm_jsonrpc_request_t req = {0};
+    int rc = cbm_jsonrpc_parse(line, &req);
+    ASSERT_EQ(rc, 0);
+    ASSERT_TRUE(req.has_id);
+    ASSERT_NOT_NULL(req.id_str);
+    ASSERT_STR_EQ(req.id_str, "init-abc");
+    cbm_jsonrpc_request_free(&req);
+
+    /* A purely non-numeric string would have become 0 under strtol. */
+    const char *line2 = "{\"jsonrpc\":\"2.0\",\"id\":\"xyz\",\"method\":\"ping\"}";
+    cbm_jsonrpc_request_t req2 = {0};
+    ASSERT_EQ(cbm_jsonrpc_parse(line2, &req2), 0);
+    ASSERT_NOT_NULL(req2.id_str);
+    ASSERT_STR_EQ(req2.id_str, "xyz");
+    cbm_jsonrpc_request_free(&req2);
+    PASS();
+}
+
+/* issue #253: the response must echo the string id verbatim, not as a number. */
+TEST(jsonrpc_format_response_string_id_issue253) {
+    cbm_jsonrpc_response_t resp = {
+        .id_str = "init-abc",
+        .result_json = "{\"ok\":true}",
+    };
+    char *json = cbm_jsonrpc_format_response(&resp);
+    ASSERT_NOT_NULL(json);
+    ASSERT_NOT_NULL(strstr(json, "\"id\":\"init-abc\""));
+    /* Must NOT have coerced to a numeric id. */
+    ASSERT_NULL(strstr(json, "\"id\":0"));
+    free(json);
     PASS();
 }
 
@@ -520,6 +558,41 @@ TEST(tool_search_graph_basic) {
     PASS();
 }
 
+/* Forward declarations for helpers defined later in this file */
+static cbm_mcp_server_t *setup_snippet_server(char *tmp_dir, size_t tmp_sz);
+static void cleanup_snippet_dir(const char *tmp_dir);
+static char *extract_text_content(const char *mcp_result);
+
+TEST(tool_search_graph_includes_node_properties) {
+    /* search_graph results must surface each node's properties_json
+     * payload so callers don't have to round-trip through get_code_snippet
+     * just to read them. The setup_snippet_server inserts HandleRequest
+     * with a signature/return_type/is_exported property blob; this test
+     * pins that those keys reach the MCP response. */
+    char tmp[256];
+    cbm_mcp_server_t *srv = setup_snippet_server(tmp, sizeof(tmp));
+    ASSERT_NOT_NULL(srv);
+
+    char *resp = cbm_mcp_server_handle(
+        srv, "{\"jsonrpc\":\"2.0\",\"id\":42,\"method\":\"tools/call\","
+             "\"params\":{\"name\":\"search_graph\","
+             "\"arguments\":{\"project\":\"test-project\",\"label\":\"Function\","
+             "\"name_pattern\":\"HandleRequest\",\"limit\":5}}}");
+    ASSERT_NOT_NULL(resp);
+    char *inner = extract_text_content(resp);
+    ASSERT_NOT_NULL(inner);
+    /* Properties from HandleRequest's properties_json must appear. */
+    ASSERT_NOT_NULL(strstr(inner, "signature"));
+    ASSERT_NOT_NULL(strstr(inner, "func HandleRequest"));
+    ASSERT_NOT_NULL(strstr(inner, "is_exported"));
+    free(inner);
+    free(resp);
+
+    cbm_mcp_server_free(srv);
+    cleanup_snippet_dir(tmp);
+    PASS();
+}
+
 TEST(tool_query_graph_basic) {
     cbm_mcp_server_t *srv = setup_mcp_with_data();
 
@@ -613,6 +686,56 @@ TEST(tool_get_architecture_empty) {
     ASSERT_TRUE(strstr(resp, "not found") || strstr(resp, "not indexed"));
     free(resp);
 
+    cbm_mcp_server_free(srv);
+    PASS();
+}
+
+/* Regression for #281: handle_get_architecture must actually call
+ * cbm_store_get_architecture and surface its sections. Before the fix
+ * only label/edge histograms were emitted regardless of which aspects
+ * were requested. The store-side arch_entry_points query reads
+ * properties.is_entry_point on Function nodes, so we tag one node and
+ * assert the resulting JSON surfaces an "entry_points" array containing
+ * the tagged function — which is impossible without the wiring. */
+TEST(tool_get_architecture_emits_populated_sections) {
+    cbm_mcp_server_t *srv = cbm_mcp_server_new(NULL);
+    ASSERT_NOT_NULL(srv);
+
+    cbm_store_t *st = cbm_mcp_server_store(srv);
+    ASSERT_NOT_NULL(st);
+
+    const char *proj = "arch-test";
+    cbm_mcp_server_set_project(srv, proj);
+    cbm_store_upsert_project(st, proj, "/tmp/arch-test");
+
+    cbm_node_t main_fn = {0};
+    main_fn.project = proj;
+    main_fn.label = "Function";
+    main_fn.name = "main";
+    main_fn.qualified_name = "arch-test.cmd.main";
+    main_fn.file_path = "cmd/main.go";
+    main_fn.start_line = 1;
+    main_fn.end_line = 3;
+    main_fn.properties_json = "{\"is_entry_point\":true}";
+    ASSERT_GT(cbm_store_upsert_node(st, &main_fn), 0);
+
+    char *resp = cbm_mcp_server_handle(
+        srv, "{\"jsonrpc\":\"2.0\",\"id\":91,\"method\":\"tools/call\","
+             "\"params\":{\"name\":\"get_architecture\","
+             "\"arguments\":{\"project\":\"arch-test\",\"aspects\":[\"all\"]}}}");
+    ASSERT_NOT_NULL(resp);
+    char *inner = extract_text_content(resp);
+    ASSERT_NOT_NULL(inner);
+
+    /* The handler always emits node/edge counts and schema histograms;
+     * those existed before #281. The "entry_points" array only appears
+     * when cbm_store_get_architecture is actually called and its result
+     * is serialized — which is exactly what #281 wires up. */
+    ASSERT_NOT_NULL(strstr(inner, "\"entry_points\""));
+    ASSERT_NOT_NULL(strstr(inner, "main"));
+
+    free(inner);
+    free(resp);
     cbm_mcp_server_free(srv);
     PASS();
 }
@@ -716,6 +839,110 @@ TEST(tool_search_code_no_project) {
     PASS();
 }
 
+TEST(search_code_multi_word) {
+    char tmp[512];
+    cbm_mcp_server_t *srv = setup_snippet_server(tmp, sizeof(tmp));
+    ASSERT_NOT_NULL(srv);
+
+    /* Multi-word query "HandleRequest error" — should find the line
+     * "func HandleRequest() error {" via regex conversion. */
+    char req[512];
+    snprintf(req, sizeof(req),
+             "{\"jsonrpc\":\"2.0\",\"id\":90,\"method\":\"tools/call\","
+             "\"params\":{\"name\":\"search_code\","
+             "\"arguments\":{\"pattern\":\"HandleRequest error\","
+             "\"project\":\"test-project\"}}}");
+
+    char *resp = cbm_mcp_server_handle(srv, req);
+    ASSERT_NOT_NULL(resp);
+    /* Should find at least one result (not zero) */
+    ASSERT_TRUE(strstr(resp, "HandleRequest") != NULL);
+    /* Should NOT contain an error about "not found" */
+    ASSERT_TRUE(strstr(resp, "\"isError\":true") == NULL);
+    free(resp);
+
+    cleanup_snippet_dir(tmp);
+    cbm_mcp_server_free(srv);
+    PASS();
+}
+
+/* issue #283: search_code with regex=true and a syntactically invalid pattern
+ * must return an explicit error, not an empty result indistinguishable from a
+ * legitimate no-match. */
+TEST(search_code_invalid_regex_errors_issue283) {
+    char tmp[512];
+    cbm_mcp_server_t *srv = setup_snippet_server(tmp, sizeof(tmp));
+    ASSERT_NOT_NULL(srv);
+
+    /* Unclosed group under regex=true → must be flagged as an error. */
+    char *resp =
+        cbm_mcp_server_handle(srv, "{\"jsonrpc\":\"2.0\",\"id\":91,\"method\":\"tools/call\","
+                                   "\"params\":{\"name\":\"search_code\","
+                                   "\"arguments\":{\"pattern\":\"func(\",\"regex\":true,"
+                                   "\"project\":\"test-project\"}}}");
+    ASSERT_NOT_NULL(resp);
+    ASSERT_NOT_NULL(strstr(resp, "\"isError\":true"));
+    ASSERT_NOT_NULL(strstr(resp, "invalid regex"));
+    free(resp);
+
+    /* Same pattern as a literal (regex=false) must NOT error. */
+    resp = cbm_mcp_server_handle(srv, "{\"jsonrpc\":\"2.0\",\"id\":92,\"method\":\"tools/call\","
+                                      "\"params\":{\"name\":\"search_code\","
+                                      "\"arguments\":{\"pattern\":\"func(\",\"regex\":false,"
+                                      "\"project\":\"test-project\"}}}");
+    ASSERT_NOT_NULL(resp);
+    ASSERT_TRUE(strstr(resp, "invalid regex") == NULL);
+    free(resp);
+
+    cleanup_snippet_dir(tmp);
+    cbm_mcp_server_free(srv);
+    PASS();
+}
+
+/* issue #282: a literal '|' under regex=false is a silent 0-match trap. It must
+ * now be surfaced as a warning (and the result carries elapsed_ms). */
+TEST(search_code_literal_pipe_warns_issue282) {
+    char tmp[512];
+    cbm_mcp_server_t *srv = setup_snippet_server(tmp, sizeof(tmp));
+    ASSERT_NOT_NULL(srv);
+
+    char *resp =
+        cbm_mcp_server_handle(srv, "{\"jsonrpc\":\"2.0\",\"id\":93,\"method\":\"tools/call\","
+                                   "\"params\":{\"name\":\"search_code\","
+                                   "\"arguments\":{\"pattern\":\"HandleRequest|Nope\","
+                                   "\"regex\":false,\"project\":\"test-project\"}}}");
+    ASSERT_NOT_NULL(resp);
+    ASSERT_NOT_NULL(strstr(resp, "warnings"));   /* surfaced, not silent */
+    ASSERT_NOT_NULL(strstr(resp, "regex=true")); /* the hint names the fix */
+    ASSERT_NOT_NULL(strstr(resp, "elapsed_ms")); /* timing is reported */
+    free(resp);
+
+    cleanup_snippet_dir(tmp);
+    cbm_mcp_server_free(srv);
+    PASS();
+}
+
+/* issue #272: '&' in a path / file_pattern is neutralised by the command's
+ * quoting and must no longer be rejected as "invalid characters". */
+TEST(search_code_ampersand_accepted_issue272) {
+    char tmp[512];
+    cbm_mcp_server_t *srv = setup_snippet_server(tmp, sizeof(tmp));
+    ASSERT_NOT_NULL(srv);
+
+    char *resp =
+        cbm_mcp_server_handle(srv, "{\"jsonrpc\":\"2.0\",\"id\":94,\"method\":\"tools/call\","
+                                   "\"params\":{\"name\":\"search_code\","
+                                   "\"arguments\":{\"pattern\":\"HandleRequest\","
+                                   "\"file_pattern\":\"*R&D*.go\",\"project\":\"test-project\"}}}");
+    ASSERT_NOT_NULL(resp);
+    ASSERT_TRUE(strstr(resp, "invalid characters") == NULL);
+    free(resp);
+
+    cleanup_snippet_dir(tmp);
+    cbm_mcp_server_free(srv);
+    PASS();
+}
+
 TEST(tool_detect_changes_no_project) {
     cbm_mcp_server_t *srv = cbm_mcp_server_new(NULL);
 
@@ -800,6 +1027,48 @@ TEST(tool_manage_adr_get_with_existing_adr) {
     remove(adr_path);
     rmdir(adr_dir);
     rmdir(tmp_dir);
+    PASS();
+}
+
+/* issue #256: manage_adr (MCP) and the UI /api/adr endpoints must share ONE
+ * backend. A manage_adr(update) write must be readable via cbm_store_adr_get
+ * (the exact API the UI's /api/adr GET uses). */
+TEST(tool_manage_adr_unified_backend_issue256) {
+    cbm_mcp_server_t *srv = cbm_mcp_server_new(NULL);
+    ASSERT_NOT_NULL(srv);
+    cbm_store_t *st = cbm_mcp_server_store(srv);
+    ASSERT_NOT_NULL(st);
+    cbm_store_upsert_project(st, "adr-unify", "/tmp/adr-unify");
+    cbm_mcp_server_set_project(srv, "adr-unify");
+
+    /* Write via the MCP tool. */
+    char *resp = cbm_mcp_server_handle(
+        srv, "{\"jsonrpc\":\"2.0\",\"id\":120,\"method\":\"tools/call\","
+             "\"params\":{\"name\":\"manage_adr\",\"arguments\":{\"project\":\"adr-unify\","
+             "\"mode\":\"update\",\"content\":\"## PURPOSE\\nUnified ADR backend.\\n\"}}}");
+    ASSERT_NOT_NULL(resp);
+    ASSERT_NOT_NULL(strstr(resp, "updated"));
+    free(resp);
+
+    /* Read DIRECTLY via the store API the UI /api/adr uses — must see it. */
+    cbm_adr_t adr;
+    memset(&adr, 0, sizeof(adr));
+    ASSERT_EQ(cbm_store_adr_get(st, "adr-unify", &adr), CBM_STORE_OK);
+    ASSERT_NOT_NULL(adr.content);
+    ASSERT_NOT_NULL(strstr(adr.content, "Unified ADR backend."));
+    cbm_store_adr_free(&adr);
+
+    /* And manage_adr(get) round-trips the same content. */
+    resp = cbm_mcp_server_handle(
+        srv, "{\"jsonrpc\":\"2.0\",\"id\":121,\"method\":\"tools/call\","
+             "\"params\":{\"name\":\"manage_adr\",\"arguments\":{\"project\":\"adr-unify\","
+             "\"mode\":\"get\"}}}");
+    ASSERT_NOT_NULL(resp);
+    ASSERT_NOT_NULL(strstr(resp, "Unified ADR backend."));
+    ASSERT_NULL(strstr(resp, "isError"));
+    free(resp);
+
+    cbm_mcp_server_free(srv);
     PASS();
 }
 
@@ -1093,6 +1362,13 @@ static char *extract_text_content(const char *mcp_result) {
         return strdup(mcp_result); /* fallback */
     yyjson_val *root = yyjson_doc_get_root(doc);
     yyjson_val *content = yyjson_obj_get(root, "content");
+    if (!content) {
+        /* Handle JSON-RPC wrapper: {"jsonrpc":...,"result":{"content":[...]}} */
+        yyjson_val *rpc_result = yyjson_obj_get(root, "result");
+        if (rpc_result) {
+            content = yyjson_obj_get(rpc_result, "content");
+        }
+    }
     if (!content || !yyjson_is_arr(content)) {
         yyjson_doc_free(doc);
         return strdup(mcp_result);
@@ -1476,13 +1752,15 @@ TEST(jsonrpc_parse_missing_method) {
 }
 
 TEST(jsonrpc_parse_string_id) {
-    /* JSON-RPC spec allows string IDs; parser converts via strtol */
+    /* JSON-RPC §4: string and numeric ids are distinct. A string id is
+     * preserved verbatim (issue #253), never coerced to a number. */
     const char *line = "{\"jsonrpc\":\"2.0\",\"id\":\"99\",\"method\":\"tools/list\"}";
     cbm_jsonrpc_request_t req = {0};
     int rc = cbm_jsonrpc_parse(line, &req);
     ASSERT_EQ(rc, 0);
     ASSERT_TRUE(req.has_id);
-    ASSERT_EQ(req.id, 99);
+    ASSERT_NOT_NULL(req.id_str);
+    ASSERT_STR_EQ(req.id_str, "99");
     ASSERT_STR_EQ(req.method, "tools/list");
     cbm_jsonrpc_request_free(&req);
     PASS();
@@ -1789,6 +2067,68 @@ TEST(mcp_server_run_rapid_messages) {
 }
 #endif /* !_WIN32 */
 
+/* Issue #235: passing an unrecognised project name to a tool crashed the
+ * binary with a buffer overflow while building the "available_projects"
+ * error list — collect_db_project_names overflowed projects[CBM_SZ_4K] via
+ * an unsigned underflow on (out_sz - offset) once the listed names exceeded
+ * the buffer. Fill a temp cache dir with enough long-named .db files to
+ * exceed 4 KB, then hit the bad-project path. Under ASan a regression aborts
+ * here; the fixed bounds-check keeps it clean and returns a normal error. */
+#define ISSUE235_DBNAME(buf, dir, i)                                                         \
+    snprintf((buf), sizeof(buf),                                                             \
+             "%s/proj_%02d_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" \
+             "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.db",                      \
+             (dir), (i))
+TEST(tool_bad_project_name_no_overflow_issue235) {
+    char cache[256];
+    snprintf(cache, sizeof(cache), "/tmp/cbm-badproj-XXXXXX");
+    if (!cbm_mkdtemp(cache)) {
+        PASS(); /* skip if mkdtemp fails */
+    }
+
+    const char *saved = getenv("CBM_CACHE_DIR");
+    char *saved_copy = saved ? strdup(saved) : NULL;
+    cbm_setenv("CBM_CACHE_DIR", cache, 1);
+
+    /* 40 * ~130-char names overflows the 4 KB available-projects buffer. */
+    enum { ISSUE235_N = 40 };
+    for (int i = 0; i < ISSUE235_N; i++) {
+        char name[512];
+        ISSUE235_DBNAME(name, cache, i);
+        FILE *fp = fopen(name, "w");
+        if (fp) {
+            fputc('x', fp);
+            fclose(fp);
+        }
+    }
+
+    cbm_mcp_server_t *srv = cbm_mcp_server_new(NULL);
+    ASSERT_NOT_NULL(srv);
+    char *resp = cbm_mcp_server_handle(
+        srv, "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"tools/call\",\"params\":{\"name\":"
+             "\"search_graph\",\"arguments\":{\"label\":\"Function\","
+             "\"project\":\"definitely-not-a-real-project-xyz\"}}}");
+    ASSERT_NOT_NULL(resp);
+    ASSERT_NOT_NULL(strstr(resp, "not found"));
+    free(resp);
+    cbm_mcp_server_free(srv);
+
+    if (saved_copy) {
+        cbm_setenv("CBM_CACHE_DIR", saved_copy, 1);
+        free(saved_copy);
+    } else {
+        cbm_unsetenv("CBM_CACHE_DIR");
+    }
+    for (int i = 0; i < ISSUE235_N; i++) {
+        char name[512];
+        ISSUE235_DBNAME(name, cache, i);
+        cbm_unlink(name);
+    }
+    cbm_rmdir(cache);
+    PASS();
+}
+#undef ISSUE235_DBNAME
+
 /* ══════════════════════════════════════════════════════════════════
  *  SUITE
  * ══════════════════════════════════════════════════════════════════ */
@@ -1799,6 +2139,8 @@ SUITE(mcp) {
     RUN_TEST(jsonrpc_parse_notification);
     RUN_TEST(jsonrpc_parse_invalid);
     RUN_TEST(jsonrpc_parse_tools_call);
+    RUN_TEST(jsonrpc_parse_string_id_issue253);
+    RUN_TEST(jsonrpc_format_response_string_id_issue253);
 
     /* JSON-RPC parsing — edge cases */
     RUN_TEST(jsonrpc_parse_empty_string);
@@ -1860,6 +2202,7 @@ SUITE(mcp) {
     RUN_TEST(tool_get_graph_schema_empty);
     RUN_TEST(tool_unknown_tool);
     RUN_TEST(tool_search_graph_basic);
+    RUN_TEST(tool_search_graph_includes_node_properties);
     RUN_TEST(tool_query_graph_basic);
     RUN_TEST(tool_index_status_no_project);
 
@@ -1868,6 +2211,7 @@ SUITE(mcp) {
     RUN_TEST(tool_trace_missing_function_name);
     RUN_TEST(tool_delete_project_not_found);
     RUN_TEST(tool_get_architecture_empty);
+    RUN_TEST(tool_get_architecture_emits_populated_sections);
     RUN_TEST(tool_query_graph_missing_query);
 
     /* Pipeline-dependent tool handlers */
@@ -1876,9 +2220,14 @@ SUITE(mcp) {
     RUN_TEST(tool_get_code_snippet_not_found);
     RUN_TEST(tool_search_code_missing_pattern);
     RUN_TEST(tool_search_code_no_project);
+    RUN_TEST(search_code_multi_word);
+    RUN_TEST(search_code_invalid_regex_errors_issue283);
+    RUN_TEST(search_code_literal_pipe_warns_issue282);
+    RUN_TEST(search_code_ampersand_accepted_issue272);
     RUN_TEST(tool_detect_changes_no_project);
     RUN_TEST(tool_manage_adr_no_project);
     RUN_TEST(tool_manage_adr_get_with_existing_adr);
+    RUN_TEST(tool_manage_adr_unified_backend_issue256);
     RUN_TEST(tool_ingest_traces_basic);
     RUN_TEST(tool_ingest_traces_empty);
 
@@ -1921,4 +2270,5 @@ SUITE(mcp) {
     RUN_TEST(snippet_auto_resolve_enabled);
     RUN_TEST(snippet_include_neighbors_default);
     RUN_TEST(snippet_include_neighbors_enabled);
+    RUN_TEST(tool_bad_project_name_no_overflow_issue235);
 }

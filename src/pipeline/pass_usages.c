@@ -12,6 +12,7 @@
  * Depends on: pass_definitions having populated the registry and graph buffer
  */
 #include "foundation/constants.h"
+#include "foundation/str_util.h" // cbm_json_escape
 #include "pipeline/pipeline.h"
 #include "pipeline/pipeline_internal.h"
 #include "graph_buffer/graph_buffer.h"
@@ -36,7 +37,9 @@ static char *read_file(const char *path, int *out_len) {
         (void)fclose(f);
         return NULL;
     }
-    char *buf = malloc(size + SKIP_ONE);
+    /* +pad: tree-sitter lexer lookahead reads past EOF; keep it in-bounds */
+    enum { CBM_TS_LOOKAHEAD_PAD = 16 };
+    char *buf = malloc((size_t)size + CBM_TS_LOOKAHEAD_PAD);
     if (!buf) {
         (void)fclose(f);
         return NULL;
@@ -46,7 +49,7 @@ static char *read_file(const char *path, int *out_len) {
     if (nread > (size_t)size) {
         nread = (size_t)size;
     }
-    buf[nread] = '\0';
+    memset(buf + nread, 0, CBM_TS_LOOKAHEAD_PAD);
     *out_len = (int)nread;
     return buf;
 }
@@ -221,8 +224,12 @@ static int resolve_usage_edges(cbm_pipeline_ctx_t *ctx, const CBMFileResult *res
             continue;
         }
 
-        char uprops[CBM_SZ_256];
-        snprintf(uprops, sizeof(uprops), "{\"callee\":\"%s\"}", usage->ref_name);
+        /* ref_name is sliced source text and can contain quotes/newlines —
+         * escape it or the edge properties JSON is malformed. */
+        char esc_ref[CBM_SZ_256];
+        cbm_json_escape(esc_ref, sizeof(esc_ref), usage->ref_name);
+        char uprops[CBM_SZ_512];
+        snprintf(uprops, sizeof(uprops), "{\"callee\":\"%s\"}", esc_ref);
         cbm_gbuf_insert_edge(ctx->gbuf, src->id, tgt->id, "USAGE", uprops);
         resolved++;
     }

@@ -29,6 +29,11 @@ done
 
 print_env "lint.sh"
 
+# No-skips policy: every test must pass or fail. The only tolerable skip is a
+# genuinely platform-specific test (SKIP_PLATFORM / #ifdef). Runs in both modes.
+echo "=== no-skips policy (tests pass or fail) ==="
+bash "$ROOT/scripts/check-no-test-skips.sh"
+
 if $CI_ONLY; then
     echo "=== CI mode: cppcheck + clang-format ==="
     $ARCH_PREFIX make -j2 -f Makefile.cbm lint-ci "${MAKE_ARGS[@]+"${MAKE_ARGS[@]}"}"

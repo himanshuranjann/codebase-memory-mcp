@@ -22,13 +22,15 @@ struct cbm_config;                    /* from cli/cli.h */
 typedef struct {
     const char *jsonrpc;    /* "2.0" */
     const char *method;     /* e.g. "initialize", "tools/call" */
-    int64_t id;             /* request ID (-1 if notification) */
+    int64_t id;             /* request ID (numeric form; -1 if notification) */
+    const char *id_str;     /* non-NULL when id is a JSON string (issue #253) */
     bool has_id;            /* false for notifications */
     const char *params_raw; /* raw JSON string of params */
 } cbm_jsonrpc_request_t;
 
 typedef struct {
     int64_t id;
+    const char *id_str;      /* non-NULL to echo a string id verbatim (issue #253) */
     const char *result_json; /* JSON string for result (success) */
     const char *error_json;  /* JSON string for error (failure), NULL on success */
     int error_code;          /* JSON-RPC error code */
@@ -124,6 +126,14 @@ cbm_store_t *cbm_mcp_server_store(cbm_mcp_server_t *srv);
 /* Set the project name associated with the server's current store (for test setup).
  * This prevents resolve_store() from trying to open a .db file when tools specify a project. */
 void cbm_mcp_server_set_project(cbm_mcp_server_t *srv, const char *project);
+
+/* ── Cancellation support ─────────────────────────────────────── */
+
+struct cbm_pipeline; /* forward decl */
+
+/* Get the currently active pipeline (for signal handler cancellation).
+ * Returns NULL if no pipeline is running. */
+struct cbm_pipeline *cbm_mcp_server_active_pipeline(cbm_mcp_server_t *srv);
 
 /* ── URI helpers ───────────────────────────────────────────────── */
 

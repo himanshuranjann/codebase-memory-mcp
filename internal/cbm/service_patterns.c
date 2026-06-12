@@ -14,6 +14,7 @@
 
 #include <stdbool.h>
 #include <stddef.h>
+#include <stdlib.h>
 #include <string.h>
 
 /* ── Library identifier → edge type ────────────────────────────── */
@@ -153,19 +154,25 @@ static const lib_pattern_t async_libraries[] = {
     {"cloud.pubsub", CBM_SVC_ASYNC, "pubsub"},
     {"PubSub", CBM_SVC_ASYNC, "pubsub"},
 
-    /* AWS — use SDK module paths to avoid false positives */
+    /* AWS — use SDK module paths to avoid false positives.  cbm_fqn_compute
+     * converts path slashes to '.', so a resolved local Go QN reads
+     * "aws-sdk-go.service.sqs..."; include both slash and dot forms so the
+     * substring match fires whether the id comes from an import path or a QN. */
     {"aws-sdk-go/service/sqs", CBM_SVC_ASYNC, "sqs"},
+    {"aws-sdk-go.service.sqs", CBM_SVC_ASYNC, "sqs"},
     {"aws_sdk_sqs", CBM_SVC_ASYNC, "sqs"},
     {"Amazon.SQS", CBM_SVC_ASYNC, "sqs"},
     {"@aws-sdk/client-sqs", CBM_SVC_ASYNC, "sqs"},
     {"boto3.client.sqs", CBM_SVC_ASYNC, "sqs"},
     {"aws-sdk-go/service/sns", CBM_SVC_ASYNC, "sns"},
+    {"aws-sdk-go.service.sns", CBM_SVC_ASYNC, "sns"},
     {"aws_sdk_sns", CBM_SVC_ASYNC, "sns"},
     {"Amazon.SNS", CBM_SVC_ASYNC, "sns"},
     {"@aws-sdk/client-sns", CBM_SVC_ASYNC, "sns"},
     {"eventbridge", CBM_SVC_ASYNC, "eventbridge"},
     {"EventBridge", CBM_SVC_ASYNC, "eventbridge"},
     {"aws-sdk-go/service/lambda", CBM_SVC_ASYNC, "lambda"},
+    {"aws-sdk-go.service.lambda", CBM_SVC_ASYNC, "lambda"},
     {"aws_sdk_lambda", CBM_SVC_ASYNC, "lambda"},
     {"@aws-sdk/client-lambda", CBM_SVC_ASYNC, "lambda"},
     {"stepfunctions", CBM_SVC_ASYNC, "stepfunctions"},
@@ -233,6 +240,28 @@ static const lib_pattern_t async_libraries[] = {
 
     /* Scala */
     {"Alpakka", CBM_SVC_ASYNC, "alpakka"},
+
+    /* MQTT */
+    {"mqtt", CBM_SVC_ASYNC, "mqtt"},
+    {"paho.mqtt", CBM_SVC_ASYNC, "mqtt"},
+    {"MQTTClient", CBM_SVC_ASYNC, "mqtt"},
+    {"mosquitto", CBM_SVC_ASYNC, "mqtt"},
+    {"asyncio_mqtt", CBM_SVC_ASYNC, "mqtt"},
+    {"gmqtt", CBM_SVC_ASYNC, "mqtt"},
+    {"rumqttc", CBM_SVC_ASYNC, "mqtt"},
+
+    /* NATS */
+    {"nats.go", CBM_SVC_ASYNC, "nats"},
+    {"nats-py", CBM_SVC_ASYNC, "nats"},
+    {"nats.ws", CBM_SVC_ASYNC, "nats"},
+    {"nats.java", CBM_SVC_ASYNC, "nats"},
+    {"nats.net", CBM_SVC_ASYNC, "nats"},
+    {"async-nats", CBM_SVC_ASYNC, "nats"},
+    {"nats.rs", CBM_SVC_ASYNC, "nats"},
+
+    /* Dapr pub/sub */
+    {"dapr.clients.grpc", CBM_SVC_ASYNC, "dapr"},
+    {"DaprClient", CBM_SVC_ASYNC, "dapr"},
 
     {NULL, CBM_SVC_NONE, NULL},
 };
@@ -351,6 +380,88 @@ static const lib_pattern_t route_reg_libraries[] = {
     {NULL, CBM_SVC_NONE, NULL},
 };
 
+/* gRPC client libraries — protobuf stub invocations */
+static const lib_pattern_t grpc_libraries[] = {
+    /* Go */
+    {"google.golang.org/grpc", CBM_SVC_GRPC, NULL},
+    {"grpc.Dial", CBM_SVC_GRPC, NULL},
+    {"grpc.NewClient", CBM_SVC_GRPC, NULL},
+    {"grpc.DialContext", CBM_SVC_GRPC, NULL},
+
+    /* Python */
+    {"grpc.insecure_channel", CBM_SVC_GRPC, NULL},
+    {"grpc.secure_channel", CBM_SVC_GRPC, NULL},
+    {"grpcio", CBM_SVC_GRPC, NULL},
+    {"grpc.aio", CBM_SVC_GRPC, NULL},
+
+    /* Java/Kotlin */
+    {"io.grpc", CBM_SVC_GRPC, NULL},
+    {"ManagedChannelBuilder", CBM_SVC_GRPC, NULL},
+    {"ManagedChannel", CBM_SVC_GRPC, NULL},
+    {"newBlockingStub", CBM_SVC_GRPC, NULL},
+    {"newFutureStub", CBM_SVC_GRPC, NULL},
+
+    /* C# */
+    {"Grpc.Net.Client", CBM_SVC_GRPC, NULL},
+    {"GrpcChannel", CBM_SVC_GRPC, NULL},
+    {"Grpc.Core", CBM_SVC_GRPC, NULL},
+
+    /* JS/TS */
+    {"@grpc/grpc-js", CBM_SVC_GRPC, NULL},
+    {"grpc-web", CBM_SVC_GRPC, NULL},
+
+    /* Rust */
+    {"tonic", CBM_SVC_GRPC, NULL},
+
+    /* Dart/Flutter */
+    {"package:grpc", CBM_SVC_GRPC, NULL},
+
+    {NULL, CBM_SVC_NONE, NULL},
+};
+
+/* GraphQL client libraries */
+static const lib_pattern_t graphql_libraries[] = {
+    /* JS/TS */
+    {"graphql-request", CBM_SVC_GRAPHQL, NULL},
+    {"@apollo/client", CBM_SVC_GRAPHQL, NULL},
+    {"apollo-client", CBM_SVC_GRAPHQL, NULL},
+    {"urql", CBM_SVC_GRAPHQL, NULL},
+    {"graphql-tag", CBM_SVC_GRAPHQL, NULL},
+
+    /* Python */
+    {"gql", CBM_SVC_GRAPHQL, NULL},
+    {"sgqlc", CBM_SVC_GRAPHQL, NULL},
+    {"graphene", CBM_SVC_GRAPHQL, NULL},
+
+    /* Java */
+    {"graphql-java", CBM_SVC_GRAPHQL, NULL},
+    {"DgsQueryExecutor", CBM_SVC_GRAPHQL, NULL},
+
+    /* Go */
+    {"graphql-go", CBM_SVC_GRAPHQL, NULL},
+    {"gqlgen", CBM_SVC_GRAPHQL, NULL},
+
+    /* Ruby */
+    {"graphql-ruby", CBM_SVC_GRAPHQL, NULL},
+
+    /* Rust */
+    {"async-graphql", CBM_SVC_GRAPHQL, NULL},
+    {"juniper", CBM_SVC_GRAPHQL, NULL},
+
+    {NULL, CBM_SVC_NONE, NULL},
+};
+
+/* tRPC libraries (TypeScript only) */
+static const lib_pattern_t trpc_libraries[] = {
+    {"@trpc/server", CBM_SVC_TRPC, NULL},
+    {"@trpc/client", CBM_SVC_TRPC, NULL},
+    {"@trpc/react-query", CBM_SVC_TRPC, NULL},
+    {"createTRPCRouter", CBM_SVC_TRPC, NULL},
+    {"createTRPCProxyClient", CBM_SVC_TRPC, NULL},
+
+    {NULL, CBM_SVC_NONE, NULL},
+};
+
 /* Method suffix type (used by both route registration and HTTP client tables) */
 typedef struct {
     const char *suffix;
@@ -441,6 +552,47 @@ static const lib_pattern_t *match_qn(const char *qn, const lib_pattern_t *patter
 
 /* ── Public API ────────────────────────────────────────────────── */
 
+/* Per-worker TLS cache of cbm_service_pattern_match results.
+ * The hot path in resolve_file_calls invokes pattern matching for
+ * EVERY resolved CALL (via emit_service_edge) — that's 6 pattern-list
+ * scans × ~30 patterns × strstr per call. On kubernetes (~600k
+ * resolved call edges), the same resolved QN (e.g. "context.Context.
+ * Done", "fmt.Errorf", "errors.New") repeats hundreds of thousands of
+ * times. A simple TLS hash cache turns the linear scan into one
+ * lookup after the first miss for that QN. Lifetime is per-worker for
+ * the duration of the parallel_resolve phase. */
+#include "foundation/hash_table.h"
+#include "foundation/compat.h"
+
+static CBM_TLS CBMHashTable *_svc_cache = NULL;
+/* Encode the enum + 1 in the pointer so 0/NULL means "miss". */
+static inline void *svc_enum_to_ptr(cbm_svc_kind_t k) {
+    return (void *)(uintptr_t)((unsigned)k + 1u);
+}
+static inline cbm_svc_kind_t svc_ptr_to_enum(void *p) {
+    return (cbm_svc_kind_t)((uintptr_t)p - 1u);
+}
+
+static void svc_cache_free_key(const char *key, void *val, void *ud) {
+    (void)val;
+    (void)ud;
+    free((char *)key);
+}
+
+void cbm_service_pattern_cache_begin(void) {
+    if (_svc_cache)
+        return; /* idempotent */
+    _svc_cache = cbm_ht_create(8192);
+}
+
+void cbm_service_pattern_cache_end(void) {
+    if (!_svc_cache)
+        return;
+    cbm_ht_foreach(_svc_cache, svc_cache_free_key, NULL);
+    cbm_ht_free(_svc_cache);
+    _svc_cache = NULL;
+}
+
 void cbm_service_patterns_init(void) {
     /* No-op — tables are static const */
 }
@@ -450,29 +602,39 @@ cbm_svc_kind_t cbm_service_pattern_match(const char *resolved_qn) {
         return CBM_SVC_NONE;
     }
 
+    if (_svc_cache) {
+        void *cached = cbm_ht_get(_svc_cache, resolved_qn);
+        if (cached) {
+            return svc_ptr_to_enum(cached);
+        }
+    }
+
+    cbm_svc_kind_t result = CBM_SVC_NONE;
+    const lib_pattern_t *p;
+
     /* Route registration checked first — prevents gin/echo from matching
      * as HTTP clients (both have .get/.post suffixes). */
-    const lib_pattern_t *p = match_qn(resolved_qn, route_reg_libraries);
-    if (p) {
-        return p->kind;
-    }
+    if ((p = match_qn(resolved_qn, route_reg_libraries)))
+        result = p->kind;
+    else if ((p = match_qn(resolved_qn, http_libraries)))
+        result = p->kind;
+    else if ((p = match_qn(resolved_qn, async_libraries)))
+        result = p->kind;
+    else if ((p = match_qn(resolved_qn, config_libraries)))
+        result = p->kind;
+    else if ((p = match_qn(resolved_qn, grpc_libraries)))
+        result = p->kind;
+    else if ((p = match_qn(resolved_qn, graphql_libraries)))
+        result = p->kind;
+    else if ((p = match_qn(resolved_qn, trpc_libraries)))
+        result = p->kind;
 
-    p = match_qn(resolved_qn, http_libraries);
-    if (p) {
-        return p->kind;
+    if (_svc_cache) {
+        char *kdup = strdup(resolved_qn);
+        if (kdup)
+            cbm_ht_set(_svc_cache, kdup, svc_enum_to_ptr(result));
     }
-
-    p = match_qn(resolved_qn, async_libraries);
-    if (p) {
-        return p->kind;
-    }
-
-    p = match_qn(resolved_qn, config_libraries);
-    if (p) {
-        return p->kind;
-    }
-
-    return CBM_SVC_NONE;
+    return result;
 }
 
 const char *cbm_service_pattern_http_method(const char *callee_name) {
