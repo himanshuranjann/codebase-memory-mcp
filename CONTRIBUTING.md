@@ -62,9 +62,9 @@ src/
   discover/         File discovery with gitignore support
   watcher/          Git-based background auto-sync
   cli/              CLI subcommands (install, update, uninstall, config)
-  ui/               Graph visualization HTTP server (mongoose)
+  ui/               Graph visualization HTTP server (first-party httpd)
 internal/cbm/       Tree-sitter AST extraction (64 languages, vendored C grammars)
-vendored/           sqlite3, yyjson, mongoose, mimalloc, xxhash, tre
+vendored/           sqlite3, yyjson, mimalloc, xxhash, tre, nomic
 graph-ui/           React/Three.js frontend for graph visualization
 scripts/            Build, test, lint, security audit scripts
 tests/              All C test files

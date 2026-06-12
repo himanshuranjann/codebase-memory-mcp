@@ -12,10 +12,12 @@
  */
 #include "foundation/constants.h"
 
-enum { CBM_DIR_PERMS = 0755, PL_RING = 4, PL_RING_MASK = 3, PL_SEQ_PASSES = 5, PL_WAL_BUF = 1040 };
+enum { CBM_DIR_PERMS = 0755, PL_RING = 4, PL_RING_MASK = 3, PL_SEQ_PASSES = 6, PL_WAL_BUF = 1040 };
 #define PL_NSEC_PER_SEC 1000000000LL
 #include "pipeline/pipeline.h"
+#include "pipeline/artifact.h"
 #include "pipeline/pipeline_internal.h"
+#include "pipeline/pass_lsp_cross.h"
 #include "pipeline/worker_pool.h"
 #include "graph_buffer/graph_buffer.h"
 #include "store/store.h"
@@ -28,6 +30,7 @@ enum { CBM_DIR_PERMS = 0755, PL_RING = 4, PL_RING_MASK = 3, PL_SEQ_PASSES = 5, P
 #include "foundation/compat.h"
 #include "foundation/compat_thread.h"
 #include "foundation/profile.h"
+#include "foundation/mem.h"
 
 #include <stdint.h>
 #include <stdio.h>
@@ -73,14 +76,33 @@ struct cbm_pipeline {
     char *project_name;
     cbm_index_mode_t mode;
     atomic_int cancelled;
+    bool persistence; /* write .codebase-memory/graph.db.zst after indexing */
 
     /* Indexing state (set during run) */
     cbm_gbuf_t *gbuf;
     cbm_registry_t *registry;
 
+    /* Directory subtrees skipped during discovery (rel paths). Captured from
+     * cbm_discover_ex so the MCP layer can report excluded subtrees (#411).
+     * Owned by the pipeline; freed in cbm_pipeline_free. */
+    char **excluded_dirs;
+    int excluded_count;
+
     /* User-defined extension overrides (loaded once per run) */
     cbm_userconfig_t *userconfig;
 };
+
+/* ── Global pkgmap (one active pipeline at a time) ─────────────── */
+
+static CBMHashTable *g_pkgmap = NULL;
+
+CBMHashTable *cbm_pipeline_get_pkgmap(void) {
+    return g_pkgmap;
+}
+
+void cbm_pipeline_set_pkgmap(CBMHashTable *map) {
+    g_pkgmap = map;
+}
 
 /* ── Timing helper ──────────────────────────────────────────────── */
 
@@ -101,6 +123,14 @@ static const char *itoa_buf(int val) {
     return bufs[i];
 }
 
+/* Log current + peak RSS at a pipeline phase boundary (memory profiling). */
+static void log_phase_mem(const char *phase) {
+    enum { PL_BYTES_PER_MB = 1024 * 1024 };
+    cbm_log_info("mem.phase", "phase", phase, "rss_mb",
+                 itoa_buf((int)(cbm_mem_rss() / PL_BYTES_PER_MB)), "peak_mb",
+                 itoa_buf((int)(cbm_mem_peak_rss() / PL_BYTES_PER_MB)));
+}
+
 /* ── Lifecycle ──────────────────────────────────────────────────── */
 
 cbm_pipeline_t *cbm_pipeline_new(const char *repo_path, const char *db_path,
@@ -118,9 +148,16 @@ cbm_pipeline_t *cbm_pipeline_new(const char *repo_path, const char *db_path,
     p->db_path = db_path ? strdup(db_path) : NULL;
     p->project_name = cbm_project_name_from_path(repo_path);
     p->mode = mode;
+    p->persistence = false;
     atomic_init(&p->cancelled, 0);
 
     return p;
+}
+
+void cbm_pipeline_set_persistence(cbm_pipeline_t *p, bool enabled) {
+    if (p) {
+        p->persistence = enabled;
+    }
 }
 
 void cbm_pipeline_free(cbm_pipeline_t *p) {
@@ -130,6 +167,9 @@ void cbm_pipeline_free(cbm_pipeline_t *p) {
     free(p->repo_path);
     free(p->db_path);
     free(p->project_name);
+    cbm_discover_free_excluded(p->excluded_dirs, p->excluded_count);
+    p->excluded_dirs = NULL;
+    p->excluded_count = 0;
     /* gbuf, store, registry freed during/after run */
     /* Defensively free userconfig in case run() was never called or panicked */
     if (p->userconfig) {
@@ -166,6 +206,15 @@ atomic_int *cbm_pipeline_cancelled_ptr(cbm_pipeline_t *p) {
 
 int cbm_pipeline_get_mode(const cbm_pipeline_t *p) {
     return p ? (int)p->mode : 0;
+}
+
+void cbm_pipeline_get_excluded(const cbm_pipeline_t *p, char ***out, int *count) {
+    if (out) {
+        *out = p ? p->excluded_dirs : NULL;
+    }
+    if (count) {
+        *count = p ? p->excluded_count : 0;
+    }
 }
 
 /* Resolve the DB path for this pipeline. Caller must free(). */
@@ -348,13 +397,24 @@ static int process_one_infra_binding(cbm_gbuf_t *gbuf, const CBMInfraBinding *ib
     snprintf(topic_route_qn, sizeof(topic_route_qn), "__route__%s__%s",
              ib->broker ? ib->broker : "async", ib->source_name);
     const cbm_gbuf_node_t *topic_route = cbm_gbuf_find_by_qn(gbuf, topic_route_qn);
-    if (!topic_route) {
-        return 0;
+    int64_t topic_route_id;
+    if (topic_route) {
+        topic_route_id = topic_route->id;
+    } else {
+        /* The config file IS the declaration that the topic/queue/schedule exists;
+         * upsert its Route node so the binding maps even when no code-side dispatch
+         * call created the node first (e.g. a standalone scheduler/subscription
+         * manifest). */
+        topic_route_id = cbm_gbuf_upsert_node(gbuf, "Route", ib->source_name, topic_route_qn,
+                                              rel_path, 0, 0, ib->broker ? ib->broker : "async");
+        if (topic_route_id <= 0) {
+            return 0;
+        }
     }
     char props[CBM_SZ_512];
     snprintf(props, sizeof(props), "{\"broker\":\"%s\",\"topic\":\"%s\",\"endpoint\":\"%s\"}",
              ib->broker ? ib->broker : "async", ib->source_name, ib->target_url);
-    cbm_gbuf_insert_edge(gbuf, topic_route->id, url_route_id, "INFRA_MAPS", props);
+    cbm_gbuf_insert_edge(gbuf, topic_route_id, url_route_id, "INFRA_MAPS", props);
     return SKIP_ONE;
 }
 
@@ -432,6 +492,9 @@ static void predump_sem(cbm_pipeline_ctx_t *ctx) {
 static void predump_cfg(cbm_pipeline_ctx_t *ctx) {
     cbm_pipeline_pass_configlink(ctx);
 }
+static void predump_complexity(cbm_pipeline_ctx_t *ctx) {
+    cbm_pipeline_pass_complexity(ctx);
+}
 
 static void run_predump_passes(cbm_pipeline_t *p, cbm_pipeline_ctx_t *ctx) {
     static const struct {
@@ -441,12 +504,16 @@ static void run_predump_passes(cbm_pipeline_t *p, cbm_pipeline_ctx_t *ctx) {
     } passes[] = {
         {predump_deco, "decorator_tags", false}, {predump_cfg, "configlink", false},
         {predump_route, "route_match", false},   {predump_sim, "similarity", true},
-        {predump_sem, "semantic_edges", true},
+        {predump_sem, "semantic_edges", true},   {predump_complexity, "complexity", false},
     };
-    enum { PREDUMP_PASS_COUNT = 5 };
+    enum { PREDUMP_PASS_COUNT = 6 };
     struct timespec t;
     for (int i = 0; i < PREDUMP_PASS_COUNT && !check_cancel(p); i++) {
-        if (passes[i].moderate_only && p->mode > CBM_MODE_MODERATE) {
+        /* "moderate_only" passes (similarity/semantic edges) run in FULL,
+         * MODERATE and ADVANCED — they are skipped only in FAST. Compare
+         * explicitly against FAST rather than `> MODERATE` so ADVANCED
+         * (numerically 3) is not mistaken for a lighter mode than FULL. */
+        if (passes[i].moderate_only && p->mode == CBM_MODE_FAST) {
             continue;
         }
         cbm_clock_gettime(CLOCK_MONOTONIC, &t);
@@ -456,11 +523,34 @@ static void run_predump_passes(cbm_pipeline_t *p, cbm_pipeline_ctx_t *ctx) {
     }
 }
 
-/* Run the sequential pipeline path: definitions, k8s, calls, usages, semantic. */
+/* Adapter that lets cbm_pipeline_pass_lsp_cross slot into the seq_passes
+ * dispatch table. The cross-file LSP needs the per-file CBMFileResult cache
+ * to read defs/imports without re-extracting; in the sequential path that
+ * cache is ctx->result_cache (set up by run_sequential_pipeline before
+ * launching the dispatch loop). When the cache is unavailable (e.g. if the
+ * pipeline opted out of caching), the pass becomes a no-op since there are
+ * no extracted results to feed cross-file resolution. */
+static int seq_pass_lsp_cross_dispatch(cbm_pipeline_ctx_t *ctx, const cbm_file_info_t *files,
+                                       int file_count) {
+    if (!ctx || !ctx->result_cache)
+        return 0;
+    /* Cross-file LSP runs in every mode. */
+    return cbm_pipeline_pass_lsp_cross(ctx, files, file_count, ctx->result_cache);
+}
+
+/* Run the sequential pipeline path: definitions, k8s, lsp_cross, calls, usages, semantic. */
 static int run_sequential_pipeline(cbm_pipeline_t *p, cbm_pipeline_ctx_t *ctx,
                                    const cbm_file_info_t *files, int file_count,
                                    struct timespec *t) {
     cbm_log_info("pipeline.mode", "mode", "sequential", "files", itoa_buf(file_count));
+
+    /* Build package map from manifest files (sequential: read manifests directly).
+     * Use the repo-walking variant so manifests filtered out by the main
+     * discoverer (package.json, composer.json) still feed pkgmap and let
+     * workspace imports like `@my/pkg` resolve to their target Module. */
+    cbm_pipeline_set_pkgmap(
+        cbm_pkgmap_build_from_repo(ctx->repo_path, files, file_count, ctx->project_name));
+
     CBMFileResult **seq_cache = (CBMFileResult **)calloc(file_count, sizeof(CBMFileResult *));
     if (seq_cache) {
         ctx->result_cache = seq_cache;
@@ -473,6 +563,7 @@ static int run_sequential_pipeline(cbm_pipeline_t *p, cbm_pipeline_ctx_t *ctx,
     } seq_passes[] = {
         {cbm_pipeline_pass_definitions, "definitions", false},
         {cbm_pipeline_pass_k8s, "k8s", true},
+        {seq_pass_lsp_cross_dispatch, "lsp_cross", true},
         {cbm_pipeline_pass_calls, "calls", false},
         {cbm_pipeline_pass_usages, "usages", false},
         {cbm_pipeline_pass_semantic, "semantic", false},
@@ -489,6 +580,14 @@ static int run_sequential_pipeline(cbm_pipeline_t *p, cbm_pipeline_ctx_t *ctx,
         if (check_cancel(p)) {
             rc = CBM_NOT_FOUND;
         }
+    }
+    /* Consume infra bindings (YAML/HCL topic/queue/scheduler → endpoint) so
+     * INFRA_MAPS edges also form on the sequential path, not just the parallel
+     * one. process_one_infra_binding self-creates the topic Route node when no
+     * code-side dispatch created it (e.g. a standalone scheduler manifest). */
+    if (seq_cache && rc == 0) {
+        cbm_pipeline_extract_infra_routes(p->gbuf, files, seq_cache, file_count);
+        cbm_pipeline_process_infra_bindings(p->gbuf, files, seq_cache, file_count);
     }
     if (seq_cache) {
         for (int i = 0; i < file_count; i++) {
@@ -524,10 +623,19 @@ static int run_parallel_pipeline(cbm_pipeline_t *p, cbm_pipeline_ctx_t *ctx,
         return rc != 0 ? rc : CBM_NOT_FOUND;
     }
     cbm_gbuf_set_next_id(p->gbuf, atomic_load(&shared_ids));
+    /* extract -> registry handoff: return the extract phase's freed-but-retained
+     * allocator pages to the OS before registry_build allocates. On a 2x Linux
+     * index the extract peak holds ~13 GB of reclaimable pages (peak_mb 20.7 vs
+     * live rss_mb 7); not returning them pushed the process over the system
+     * memory-pressure threshold and got it SIGKILLed at registry entry. */
+    cbm_mem_collect();
+    cbm_log_info("mem.collect", "phase", "post_extract", "rss_mb",
+                 itoa_buf((int)(cbm_mem_rss() / (1024 * 1024))));
     cbm_clock_gettime(CLOCK_MONOTONIC, t);
     rc = cbm_build_registry_from_cache(ctx, files, file_count, cache);
     cbm_log_info("pass.timing", "pass", "registry_build", "elapsed_ms",
                  itoa_buf((int)elapsed_ms(*t)));
+    log_phase_mem("registry_build");
     if (rc != 0 || check_cancel(p)) {
         for (int i = 0; i < file_count; i++) {
             if (cache[i]) {
@@ -537,10 +645,80 @@ static int run_parallel_pipeline(cbm_pipeline_t *p, cbm_pipeline_ctx_t *ctx,
         free(cache);
         return rc != 0 ? rc : CBM_NOT_FOUND;
     }
+    /* Cross-file LSP precondition: build a project-wide CBMLSPDef[]
+     * once. The fused resolve_worker invokes cbm_pxc_run_one(_ts) per
+     * file using these defs + the file's IMPORTS map, so cross-file
+     * type-resolved CALLS land in result->resolved_calls before the
+     * CALLS-edge emission. This replaces the old sequential
+     * cbm_pipeline_pass_lsp_cross pass which re-read every source from
+     * disk and re-parsed every tree on a single thread (~520s on
+     * kubernetes). Soft-failure: NULL all_defs / NULL def_modules just
+     * mean cross-file LSP no-ops; per-file LSP already ran during
+     * extract. */
     cbm_clock_gettime(CLOCK_MONOTONIC, t);
-    rc = cbm_parallel_resolve(ctx, files, file_count, cache, &shared_ids, worker_count);
+    /* Cross-file LSP (type-aware call/usage resolution across files) — the
+     * most expensive phase. CBM_DISABLE_LSP_CROSS=1 opts out (it can SIGSEGV
+     * on large TS projects — see #340/#344); with cross-LSP off, all_defs
+     * stays NULL and the fused resolver simply no-ops cross-file resolution
+     * (per-file LSP already ran during extract). */
+    char cbm_lsp_cross_env[CBM_SZ_16];
+    const bool run_cross_lsp = cbm_safe_getenv("CBM_DISABLE_LSP_CROSS", cbm_lsp_cross_env,
+                                               sizeof(cbm_lsp_cross_env), NULL) == NULL;
+    if (!run_cross_lsp) {
+        cbm_log_info("lsp_cross.skipped", "reason", "CBM_DISABLE_LSP_CROSS env set");
+    }
+    char **def_modules = NULL;
+    int def_count = 0;
+    CBMLSPDef *all_defs = NULL;
+    if (run_cross_lsp) {
+        def_modules = (char **)calloc((size_t)file_count, sizeof(char *));
+        all_defs = def_modules
+                       ? cbm_pxc_collect_all_defs(cache, files, file_count, ctx->project_name,
+                                                  def_modules, &def_count)
+                       : NULL;
+    }
+    /* Build inverted index: module_qn → defs. The fused resolve_worker
+     * uses this to filter the global all_defs[] down to just the defs
+     * each file actually needs (own_module + imported modules) — the
+     * gopls "package summary" pattern. Drops per-file registry build
+     * cost from O(all_defs) to O(relevant_defs), typically 50-100×
+     * smaller per file. */
+    CBMModuleDefIndex *module_def_index =
+        all_defs ? cbm_pxc_build_module_def_index(all_defs, def_count) : NULL;
+    /* Tier 2 full: pre-build per-language cross-LSP registries.
+     * Built ONCE here; shared READ-ONLY across all files of that language
+     * during resolve. Per-file work is then: parse + AST walk + O(1) lookups
+     * — no registry build, no Phase 1b mutations. Languages added so far:
+     * Go, Python. Others (C/C++, TS/JS, PHP, C#) fall back to per-file. */
+    CBMArena cross_lsp_arena;
+    cbm_arena_init(&cross_lsp_arena);
+    CBMCrossLspRegistries cross_registries = {0};
+    if (all_defs) {
+        cross_registries.go = cbm_go_build_cross_registry(&cross_lsp_arena, all_defs, def_count);
+        cross_registries.python =
+            cbm_py_build_cross_registry(&cross_lsp_arena, all_defs, def_count);
+        cross_registries.c = cbm_c_build_cross_registry(&cross_lsp_arena, all_defs, def_count);
+        cross_registries.cs = cbm_cs_build_cross_registry(&cross_lsp_arena, all_defs, def_count);
+        cross_registries.ts = cbm_ts_build_cross_registry(&cross_lsp_arena, all_defs, def_count);
+    }
+    cbm_log_info("pass.timing", "pass", "lsp_cross_prepare", "elapsed_ms",
+                 itoa_buf((int)elapsed_ms(*t)));
+    log_phase_mem("lsp_cross_prepare");
+    cbm_clock_gettime(CLOCK_MONOTONIC, t);
+    rc = cbm_parallel_resolve(ctx, files, file_count, cache, &shared_ids, worker_count, all_defs,
+                              def_count, def_modules, module_def_index, &cross_registries);
     cbm_log_info("pass.timing", "pass", "parallel_resolve", "elapsed_ms",
                  itoa_buf((int)elapsed_ms(*t)));
+    log_phase_mem("parallel_resolve");
+    cbm_pxc_free_module_def_index(module_def_index);
+    cbm_arena_destroy(&cross_lsp_arena); /* releases all per-lang registries */
+    free(all_defs);
+    if (def_modules) {
+        for (int i = 0; i < file_count; i++) {
+            free(def_modules[i]);
+        }
+        free(def_modules);
+    }
     cbm_gbuf_set_next_id(p->gbuf, atomic_load(&shared_ids));
     cbm_pipeline_extract_infra_routes(p->gbuf, files, cache, file_count);
     cbm_pipeline_process_infra_bindings(p->gbuf, files, cache, file_count);
@@ -672,6 +850,12 @@ static int dump_and_persist_hashes(cbm_pipeline_t *p, const cbm_file_info_t *fil
         cbm_store_close(hash_store);
         cbm_log_info("pass.timing", "pass", "persist_hashes", "files", itoa_buf(file_count));
     }
+
+    /* Export persistent artifact if enabled */
+    if (p->persistence) {
+        cbm_artifact_export(db_path, p->repo_path, p->project_name, CBM_ARTIFACT_BEST);
+    }
+
     return 0;
 }
 
@@ -707,12 +891,13 @@ static int run_githistory(cbm_pipeline_t *p, cbm_pipeline_ctx_t *ctx) {
     }
 
     int gh_edges = 0;
-    if (gh_result.count > 0) {
+    if (gh_result.count > 0 || gh_result.file_temporal_count > 0) {
         gh_edges = cbm_pipeline_githistory_apply(ctx, &gh_result);
     }
     cbm_log_info("pass.done", "pass", "githistory", "commits", itoa_buf(gh_result.commit_count),
                  "edges", itoa_buf(gh_edges));
     free(gh_result.couplings);
+    free(gh_result.file_temporal);
     return 0;
 }
 
@@ -794,6 +979,12 @@ int cbm_pipeline_run(cbm_pipeline_t *p) {
     CBM_PROF_START(t_pipeline_total);
     struct timespec t0;
     cbm_clock_gettime(CLOCK_MONOTONIC, &t0);
+    cbm_path_alias_collection_t *path_aliases = NULL;
+
+    /* C/C++ #define Macro nodes (#375) dominate extraction on macro-dense repos
+     * (≈49% of nodes on the Linux kernel), so gate them to full mode — moderate
+     * and fast skip them entirely. Set before any extraction dispatch. */
+    cbm_set_macro_extraction(p->mode == CBM_MODE_FULL);
 
     /* Load user-defined extension overrides (fail-open: NULL on error) */
     CBM_PROF_START(t_userconfig);
@@ -810,7 +1001,14 @@ int cbm_pipeline_run(cbm_pipeline_t *p) {
     };
     cbm_file_info_t *files = NULL;
     int file_count = 0;
-    int rc = cbm_discover(p->repo_path, &opts, &files, &file_count);
+    /* Capture skipped subtrees on the pipeline so the MCP layer can report
+     * which directories were excluded (#411). Replace any prior list (e.g. a
+     * re-run on the same pipeline) to avoid leaking the previous one. */
+    cbm_discover_free_excluded(p->excluded_dirs, p->excluded_count);
+    p->excluded_dirs = NULL;
+    p->excluded_count = 0;
+    int rc = cbm_discover_ex(p->repo_path, &opts, &files, &file_count, &p->excluded_dirs,
+                             &p->excluded_count);
     if (rc != 0) {
         cbm_log_error("pipeline.err", "phase", "discover", "rc", itoa_buf(rc));
     }
@@ -834,6 +1032,10 @@ int cbm_pipeline_run(cbm_pipeline_t *p) {
     p->gbuf = cbm_gbuf_new(p->project_name, p->repo_path);
     p->registry = cbm_registry_new();
 
+    /* Phase 2b: Load build-tool path aliases (tsconfig/jsconfig today). NULL
+     * when no usable configs are found — non-TS projects pay nothing. */
+    path_aliases = cbm_load_path_aliases(p->repo_path);
+
     /* Build shared context for pass functions */
     cbm_pipeline_ctx_t ctx = {
         .project_name = p->project_name,
@@ -842,6 +1044,7 @@ int cbm_pipeline_run(cbm_pipeline_t *p) {
         .registry = p->registry,
         .cancelled = &p->cancelled,
         .mode = (int)p->mode,
+        .path_aliases = path_aliases,
     };
 
     rc = run_extraction_phase(p, &ctx, files, file_count);
@@ -860,11 +1063,14 @@ int cbm_pipeline_run(cbm_pipeline_t *p) {
     CBM_PROF_END("pipeline", "TOTAL", t_pipeline_total);
 
 cleanup:
+    cbm_pkgmap_free(cbm_pipeline_get_pkgmap());
+    cbm_pipeline_set_pkgmap(NULL);
     cbm_discover_free(files, file_count);
     cbm_gbuf_free(p->gbuf);
     p->gbuf = NULL;
     cbm_registry_free(p->registry);
     p->registry = NULL;
+    cbm_path_alias_collection_free(path_aliases);
     /* Clear and free user extension config */
     cbm_set_user_lang_config(NULL);
     cbm_userconfig_free(p->userconfig);

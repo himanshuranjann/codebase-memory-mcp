@@ -170,6 +170,23 @@ func TestClient_CallTool_IndexRepository(t *testing.T) {
 	}
 }
 
+func TestClient_CrossRepoIntelligence(t *testing.T) {
+	bin := buildEchoServer(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	c, err := mcp.NewClient(ctx, bin)
+	if err != nil {
+		t.Fatalf("NewClient: %v", err)
+	}
+	defer c.Close()
+
+	err = c.CrossRepoIntelligence(ctx, "/tmp/test-repo", []string{"*"})
+	if err != nil {
+		t.Fatalf("CrossRepoIntelligence: %v", err)
+	}
+}
+
 func TestClient_CallTool_Timeout(t *testing.T) {
 	bin := buildEchoServer(t)
 	// Very short timeout — should cause context deadline exceeded

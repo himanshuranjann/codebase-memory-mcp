@@ -4,6 +4,7 @@ package indexer
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"path/filepath"
 	"sync"
 
@@ -16,6 +17,9 @@ type Client interface {
 	// C binary uses it as the internal project name instead of deriving one
 	// from repoPath.
 	IndexRepository(ctx context.Context, repoPath, mode, projectName string) error
+	// CrossRepoIntelligence matches routes/channels from repoPath's project
+	// against targetProjects. Pass ["*"] to scan all indexed projects.
+	CrossRepoIntelligence(ctx context.Context, repoPath string, targetProjects []string) error
 }
 
 // ActivityChecker determines whether a repo has recent activity.
@@ -60,6 +64,9 @@ type Config struct {
 	// ActivityChecker, if set, is consulted during IndexAll. Repos for which
 	// IsActive returns false are skipped (unless force=true).
 	ActivityChecker ActivityChecker
+
+	// DisableCrossRepoAfterBatch skips the post-batch cross-repo pass (for tests).
+	DisableCrossRepoAfterBatch bool
 
 	// Optional callbacks for observability / testing.
 	OnRepoStart func(repoSlug string)
@@ -139,13 +146,19 @@ func (i *Indexer) IndexAll(ctx context.Context, repos []manifest.Repo, force boo
 	wg.Wait()
 	close(errs)
 
+	var succeededSlugs []string
 	for re := range errs {
 		if re.err != nil {
 			result.Failed++
 			result.Errors = append(result.Errors, RepoError{RepoSlug: re.slug, Err: re.err})
 		} else {
 			result.Succeeded++
+			succeededSlugs = append(succeededSlugs, re.slug)
 		}
+	}
+
+	if !i.cfg.DisableCrossRepoAfterBatch && len(succeededSlugs) > 0 {
+		i.runCrossRepoPass(ctx, succeededSlugs)
 	}
 
 	if i.cfg.OnAllComplete != nil {
@@ -153,6 +166,19 @@ func (i *Indexer) IndexAll(ctx context.Context, repos []manifest.Repo, force boo
 	}
 
 	return result
+}
+
+// runCrossRepoPass invokes cross-repo-intelligence for each source project that
+// was indexed in the current batch. The C pass matches one source against all
+// targets (or ["*"]); iterating sources yields full org coverage.
+func (i *Indexer) runCrossRepoPass(ctx context.Context, succeededSlugs []string) {
+	targets := []string{"*"}
+	for _, slug := range succeededSlugs {
+		localPath := filepath.Join(i.cfg.CacheDir, slug)
+		if err := i.cfg.Client.CrossRepoIntelligence(ctx, localPath, targets); err != nil {
+			slog.Warn("cross-repo pass failed", "repo", slug, "err", err)
+		}
+	}
 }
 
 // IndexRepo clones (or updates) a single repo and triggers indexing.

@@ -153,6 +153,31 @@ func (c *Client) Call(ctx context.Context, method string, params interface{}) (j
 	return c.roundtrip(ctx, method, params)
 }
 
+// CrossRepoIntelligence runs the C binary cross-repo pass for project derived
+// from repoPath, matching routes/channels against targetProjects (use ["*"] for all).
+func (c *Client) CrossRepoIntelligence(ctx context.Context, repoPath string, targetProjects []string) error {
+	if len(targetProjects) == 0 {
+		targetProjects = []string{"*"}
+	}
+	args := map[string]interface{}{
+		"repo_path":        repoPath,
+		"mode":             "cross-repo-intelligence",
+		"target_projects":  targetProjects,
+	}
+	result, err := c.CallTool(ctx, "index_repository", args)
+	if err != nil {
+		return fmt.Errorf("cross-repo-intelligence: %w", err)
+	}
+	if result.IsError {
+		msg := "cross-repo-intelligence returned error"
+		if len(result.Content) > 0 {
+			msg = result.Content[0].Text
+		}
+		return fmt.Errorf("cross-repo-intelligence: %s", msg)
+	}
+	return nil
+}
+
 // CallTool sends a tools/call request and returns the parsed result.
 // It is safe to call from multiple goroutines — requests are serialized.
 func (c *Client) CallTool(ctx context.Context, name string, params map[string]interface{}) (*ToolResult, error) {

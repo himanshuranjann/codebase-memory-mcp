@@ -119,7 +119,9 @@ typedef struct {
     bool aider;       /* aider on PATH */
     bool kilocode;    /* KiloCode globalStorage dir exists */
     bool vscode;      /* VS Code User config dir exists */
+    bool cursor;      /* ~/.cursor/ exists */
     bool openclaw;    /* ~/.openclaw/ exists */
+    bool kiro;        /* ~/.kiro/ exists */
 } cbm_detected_agents_t;
 
 /* Detect which coding agents are installed.
@@ -173,6 +175,12 @@ int cbm_upsert_claude_hooks(const char *settings_path);
  * Returns 0 on success. */
 int cbm_remove_claude_hooks(const char *settings_path);
 
+/* Write the PreToolUse gate shim to <home>/.claude/hooks/. The shim is a thin
+ * wrapper that invokes the compiled `hook-augment` and writes to stdout only —
+ * it must never create a predictable temp/state file (issue #384). Exposed for
+ * testing that security property. */
+void cbm_install_hook_gate_script(const char *home, const char *binary_path);
+
 /* Upsert a BeforeTool hook in ~/.gemini/settings.json for Gemini CLI / Antigravity.
  * Returns 0 on success. */
 int cbm_upsert_gemini_hooks(const char *settings_path);
@@ -180,6 +188,14 @@ int cbm_upsert_gemini_hooks(const char *settings_path);
 /* Remove our BeforeTool hook from Gemini settings.json.
  * Returns 0 on success. */
 int cbm_remove_gemini_hooks(const char *settings_path);
+
+/* Install/remove a SessionStart reminder hook in Codex config.toml (#330) and
+ * Gemini/Antigravity settings.json — same methodology as the Claude Code
+ * SessionStart hook (non-blocking; stdout injected as session context). */
+int cbm_upsert_codex_hooks(const char *config_path);
+int cbm_remove_codex_hooks(const char *config_path);
+int cbm_upsert_gemini_session_hooks(const char *settings_path);
+int cbm_remove_gemini_session_hooks(const char *settings_path);
 
 /* ── PATH management ──────────────────────────────────────────── */
 
@@ -258,5 +274,17 @@ int cbm_cmd_update(int argc, char **argv);
 
 /* config: get/set/list/reset runtime config values. */
 int cbm_cmd_config(int argc, char **argv);
+
+/* hook-augment: stdin-driven Claude Code PreToolUse augmenter.
+ * Reads the hook JSON from stdin and emits hookSpecificOutput.additionalContext
+ * with search_graph hits for Grep/Glob calls. NEVER blocks: every failure
+ * path returns 0 with no stdout output. */
+int cbm_cmd_hook_augment(void);
+
+/* Build the agent.install.plan.v1 install receipt for <home> (issue #388):
+ * a machine-readable JSON list of the config/instruction/hook files `install`
+ * would write, produced WITHOUT mutating anything. Returns a heap JSON string
+ * (caller frees) or NULL on error. Exposed for `install --plan` and testing. */
+char *cbm_build_install_plan_json(const char *home, const char *binary_path);
 
 #endif /* CBM_CLI_H */

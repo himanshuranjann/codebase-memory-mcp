@@ -60,4 +60,19 @@ scripts/clean.sh
 # Step 2 + 3: Build and run tests (with arch prefix on macOS)
 $ARCH_PREFIX make -j"$NPROC" -f Makefile.cbm test $MAKE_ARGS
 
+# Step 4: C++ large-TU index-hang regression guard (#410). Runs the PROD binary
+# in a subprocess with a wall-clock timeout — a hang must fail, not block the run.
+# Opt-in via CBM_RUN_HANG_TEST=1 (it needs the prod binary, which the ASan unit
+# run above does not build). Skipped by default so the fast unit run stays fast.
+if [ "${CBM_RUN_HANG_TEST:-0}" = "1" ]; then
+    echo "=== Step 4: C++ index-hang regression (#410) ==="
+    bash "$ROOT/tests/test_cpp_index_hang.sh"
+fi
+
+# Step 5: Parent-death watchdog regression (#406/#407). Builds the prod stdio
+# binary and verifies it self-exits when its launching parent is killed.
+echo "=== Step 5: parent-death watchdog regression (#406/#407) ==="
+$ARCH_PREFIX make -j"$NPROC" -f Makefile.cbm cbm $MAKE_ARGS
+bash "$ROOT/tests/test_parent_watchdog.sh"
+
 echo "=== All tests passed ==="

@@ -29,7 +29,7 @@ jobs:
     runs-on: ${{ matrix.os }}
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
 
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
@@ -105,9 +105,9 @@ jobs:
     runs-on: windows-latest
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
 
-      - uses: msys2/setup-msys2@cafece8e6baf9247cf9b1bf95097b0b983cc558d # v2
+      - uses: msys2/setup-msys2@e9898307ac31d1a803454791be09ab9973336e1c # v2
         with:
           msystem: CLANG64
           path-type: inherit
@@ -176,7 +176,7 @@ jobs:
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
 
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
@@ -189,8 +189,34 @@ jobs:
           chmod +x codebase-memory-mcp
           scripts/smoke-test.sh ./codebase-memory-mcp
 
+      # The -portable binary is what all linux install/update paths now deliver;
+      # it MUST start on old glibc (Debian 11 / RHEL 8 / Ubuntu 20.04). Runs it
+      # in debian:bullseye (glibc 2.31) — the standard dynamic binary would fail
+      # here with `GLIBC_2.38 not found`.
+      - name: Old-glibc compatibility
+        run: scripts/ci/check-glibc-compat.sh ./codebase-memory-mcp
+
       - name: Security audits
         run: |
           scripts/security-strings.sh ./codebase-memory-mcp
           scripts/security-install.sh ./codebase-memory-mcp
           scripts/security-network.sh ./codebase-memory-mcp
+
+  # ── Glama directory check image (non-gating) ──────────────────────
+  # Builds pkg/glama/Dockerfile — the image Glama builds to score the
+  # server — and runs an MCP initialize + tools/list handshake to confirm the
+  # containerized stdio server still starts and introspects. Guards the Glama
+  # listing integration against drift (Dockerfile breakage, release-asset
+  # renames, introspection regressions).
+  #
+  # continue-on-error: a broken *directory* image must never block a release —
+  # the shipped product binaries are unaffected. The red X is the signal to fix
+  # the Glama integration, not a release gate.
+  smoke-glama-image:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+      - name: Build Glama image and verify MCP introspection
+        run: bash pkg/glama/verify.sh

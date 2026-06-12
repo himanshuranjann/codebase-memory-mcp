@@ -1318,6 +1318,29 @@ func (p *mcpIndexClientPool) IndexRepository(ctx context.Context, repoPath, mode
 	return nil
 }
 
+func (p *mcpIndexClientPool) CrossRepoIntelligence(ctx context.Context, repoPath string, targetProjects []string) error {
+	if len(targetProjects) == 0 {
+		targetProjects = []string{"*"}
+	}
+	args := map[string]interface{}{
+		"repo_path":       repoPath,
+		"mode":            "cross-repo-intelligence",
+		"target_projects": targetProjects,
+	}
+	result, err := p.CallTool(ctx, "index_repository", args)
+	if err != nil {
+		return fmt.Errorf("cross-repo-intelligence: %w", err)
+	}
+	if result.IsError {
+		msg := "cross-repo-intelligence returned error"
+		if len(result.Content) > 0 {
+			msg = result.Content[0].Text
+		}
+		return fmt.Errorf("cross-repo-intelligence: %s", msg)
+	}
+	return nil
+}
+
 type mcpDiscoveryClientPool struct {
 	*mcpToolClientPool
 }

@@ -9,10 +9,12 @@
 #define CBM_PIPELINE_INTERNAL_H
 
 #include "pipeline/pipeline.h"
+#include "pipeline/path_alias.h"
 #include "graph_buffer/graph_buffer.h"
 #include "discover/discover.h"
 #include "foundation/hash_table.h"
 #include "cbm.h"
+#include "lsp/go_lsp.h" /* CBMLSPDef for cbm_parallel_resolve cross-LSP inputs */
 #include <stdatomic.h>
 
 /* ── Shared pipeline constants ─────────────────────────────────── */
@@ -31,6 +33,22 @@
 
 /* ── Pipeline context (internal) ─────────────────────────────────── */
 
+/* Per-worker manifest collection entry. */
+typedef struct {
+    char *pkg_name;  /* heap: "@myorg/pkg", "github.com/foo/bar" */
+    char *entry_rel; /* heap: "packages/pkg/src/index" (no extension) */
+} cbm_pkg_entry_t;
+
+/* Growable array of package entries (per-worker, no thread contention). */
+typedef struct {
+    cbm_pkg_entry_t *items;
+    int count;
+    int cap;
+} cbm_pkg_entries_t;
+
+void cbm_pkg_entries_init(cbm_pkg_entries_t *e);
+void cbm_pkg_entries_free(cbm_pkg_entries_t *e);
+
 /* Shared context passed to each pass function.
  * Derived from cbm_pipeline_t fields during run. */
 typedef struct {
@@ -39,14 +57,76 @@ typedef struct {
     cbm_gbuf_t *gbuf;         /* owned by pipeline */
     cbm_registry_t *registry; /* owned by pipeline */
     atomic_int *cancelled;    /* pointer to pipeline's cancelled flag */
-    int mode;                 /* cbm_index_mode_t (0=full, 1=moderate, 2=fast) */
+    int mode;                 /* cbm_index_mode_t (0=full, 1=moderate, 2=fast, 3=advanced) */
 
     /* Extraction result cache (sequential pipeline optimization).
      * When non-NULL, pass_definitions stores results here instead of freeing,
      * and pass_calls/usages/semantic reuse cached results instead of re-extracting.
      * Indexed by file position in the files[] array. Owned by pipeline.c. */
     CBMFileResult **result_cache;
+
+    /* Build-tool path aliases (tsconfig/jsconfig today; webpack/vite-style
+     * configs are an easy follow-on). NULL when no usable configs were found.
+     * Owned by pipeline.c / pipeline_incremental.c. */
+    const cbm_path_alias_collection_t *path_aliases;
 } cbm_pipeline_ctx_t;
+
+/* Get the current pipeline's package map (NULL if none). */
+CBMHashTable *cbm_pipeline_get_pkgmap(void);
+void cbm_pipeline_set_pkgmap(CBMHashTable *map);
+
+/* Unified module resolver: relative → pkgmap → fqn_module fallback.
+ * Handles bare specifiers via pkgmap lookup with prefix matching.
+ * Caller must free() the returned string. */
+char *cbm_pipeline_resolve_module(const cbm_pipeline_ctx_t *ctx, const char *source_rel,
+                                  const char *module_path);
+
+/* Resolve an import to its in-graph target node, or NULL if unresolvable.
+ *
+ * Resolution order (first hit wins):
+ *   1. Module-path resolution (relative / pkgmap / fqn_module) → existing node.
+ *      This preserves the behavior for Python/TS/Go whose module path maps
+ *      directly to a sibling Module/File QN.
+ *   2. namespace_map[module_path-prefix] → File node QN (Java/Kotlin/C#/PHP
+ *      `using`/`import` of a NAMESPACE that the path-based QN cannot express).
+ *   3. Symbol-name fallback: the import's last path segment matched against an
+ *      in-graph definition node of the same simple name in a different file
+ *      (Rust `use crate::util::helper`, Java `import com.example.Util`, ...).
+ *
+ * `namespace_map` may be NULL (skips step 2).  `source_file_qn` is the importing
+ * file's __file__ QN, used to avoid self-imports in step 3. */
+const cbm_gbuf_node_t *cbm_pipeline_resolve_import_node(const cbm_pipeline_ctx_t *ctx,
+                                                        const char *source_rel,
+                                                        const char *source_file_qn,
+                                                        const CBMImport *imp,
+                                                        CBMHashTable *namespace_map);
+
+/* Build a namespace → File-node-QN map from a set of extraction results.
+ * Each result that declared a namespace/package contributes one entry keyed by
+ * the namespace string (e.g. "App.Utils", "com.example").  Returns NULL when no
+ * results declared a namespace.  Caller frees via cbm_pipeline_namespace_map_free. */
+CBMHashTable *cbm_pipeline_namespace_map_build(const char *project_name,
+                                               CBMFileResult *const *results,
+                                               const char *const *rels, int count);
+void cbm_pipeline_namespace_map_free(CBMHashTable *map);
+
+/* Parse a manifest file and collect pkg entries. Returns true if basename matched. */
+bool cbm_pkgmap_try_parse(const char *basename, const char *rel_path, const char *source,
+                          int source_len, cbm_pkg_entries_t *entries);
+
+/* Merge per-worker entries into a hash table. Returns NULL if no entries. */
+CBMHashTable *cbm_pkgmap_build(cbm_pkg_entries_t *worker_entries, int worker_count,
+                               const char *project_name);
+
+/* Build pkgmap by reading manifest files from the files array (sequential path). */
+int cbm_pkgmap_scan_repo(const char *repo_path, cbm_pkg_entries_t *entries);
+CBMHashTable *cbm_pkgmap_build_from_repo(const char *repo_path, const cbm_file_info_t *files,
+                                         int file_count, const char *project_name);
+CBMHashTable *cbm_pkgmap_build_from_files(const cbm_file_info_t *files, int file_count,
+                                          const char *project_name);
+
+/* Free pkgmap and all owned strings. */
+void cbm_pkgmap_free(CBMHashTable *pkgmap);
 
 /* Check cancellation. Returns non-zero if cancelled. */
 static inline int cbm_pipeline_check_cancel(const cbm_pipeline_ctx_t *ctx) {
@@ -70,13 +150,29 @@ typedef struct {
     char file_b[CBM_SZ_512];
     int co_change_count;
     double coupling_score;
+    /* Unix epoch of the most recent commit that touched both files together.
+     * 0 when no timestamp was available (e.g. older callers / popen path
+     * without %ct). */
+    long long last_co_change;
 } cbm_change_coupling_t;
 
 /* Commit data for coupling analysis */
 typedef struct {
     char **files;
     int count;
+    /* Unix epoch of the commit. 0 means unknown — coupling computation
+     * still works but last_co_change on the resulting edge will be 0. */
+    long long timestamp;
 } cbm_commit_files_t;
+
+/* Per-file temporal metadata. Populated alongside change-coupling so File
+ * nodes can carry change_count and last_modified for hotspot / risk
+ * analysis queries. */
+typedef struct {
+    char file_path[CBM_SZ_512];
+    int change_count;
+    long long last_modified; /* unix epoch of most recent commit */
+} cbm_file_temporal_t;
 
 /* Compute change coupling from commit history.
  * Returns number of couplings written to out (up to max_out).
@@ -276,6 +372,18 @@ int cbm_parse_shell_source(const char *source, cbm_shell_result_t *out);
 /* Parse a Terraform file from source text. Returns 0 if parsed, -1 if empty. */
 int cbm_parse_terraform_source(const char *source, cbm_terraform_result_t *out);
 
+/* Helm Chart.yaml parse result: chart name + dependency chart names (#338). */
+enum { CBM_HELM_MAX_DEPS = 128, CBM_HELM_NAME_MAX = 128 };
+typedef struct {
+    char chart_name[CBM_HELM_NAME_MAX];
+    char deps[CBM_HELM_MAX_DEPS][CBM_HELM_NAME_MAX];
+    int dep_count;
+} cbm_helm_chart_t;
+
+/* Parse a Helm Chart.yaml: top-level `name:` and `dependencies:` list names.
+ * Returns 0 if parsed (name or deps found), -1 otherwise. */
+int cbm_parse_helm_chart(const char *source, cbm_helm_chart_t *out);
+
 /* Build an infrastructure QN. Caller must free the returned string. */
 char *cbm_infra_qn(const char *project_name, const char *rel_path, const char *infra_type,
                    const char *service_name);
@@ -300,9 +408,34 @@ int cbm_build_registry_from_cache(cbm_pipeline_ctx_t *ctx, const cbm_file_info_t
  * Each worker resolves calls, usages, throws, rw, inherits, decorates,
  * and implements edges into per-worker edge bufs, then merges.
  * Runs Go-style implicit IMPLEMENTS as serial post-step. */
+/* Opaque module-def index — defined in pass_lsp_cross.c. Forward-declared
+ * here so we can include it in cbm_parallel_resolve's signature without
+ * pulling the pass header into every consumer of pipeline_internal.h. */
+struct CBMModuleDefIndex;
+
+/* cbm_parallel_resolve's cross_registries param is typed `void*` to avoid
+ * pulling lsp/go_lsp.h into every TU that includes pipeline_internal.h.
+ * Callers cast a CBMCrossLspRegistries* (defined in pass_lsp_cross.h). */
+
 int cbm_parallel_resolve(cbm_pipeline_ctx_t *ctx, const cbm_file_info_t *files, int file_count,
                          CBMFileResult **result_cache, _Atomic int64_t *shared_ids,
-                         int worker_count);
+                         int worker_count,
+                         /* Cross-file LSP inputs — pre-built once by the caller and
+                          * shared read-only across workers (typed non-const to match
+                          * the existing cbm_run_X_lsp_cross signatures the resolve
+                          * worker forwards them to). Pass NULL/0/NULL to skip. */
+                         CBMLSPDef *all_defs, int def_count, char *const *def_modules,
+                         /* Optional inverted index module_qn → defs[] — fallback
+                          * path when there's no pre-built registry for this lang. */
+                         struct CBMModuleDefIndex *module_def_index,
+                         /* Optional Tier 2 full: pre-built per-language registries.
+                          * For each language with a non-NULL entry, workers use the
+                          * cbm_run_X_lsp_cross_with_registry fast path (skip per-
+                          * file registry build entirely). Falls back to the filter
+                          * + per-file build path when entry is NULL or struct is NULL.
+                          * Typed as void* here to dodge the typedef/tag ordering
+                          * problem — pass_parallel.c casts back to CBMCrossLspRegistries*. */
+                         void *cross_registries);
 
 /* Post-merge: create Route nodes for HTTP_CALLS/ASYNC_CALLS edges that
  * have url_path in properties but point to library functions instead of routes.
@@ -317,6 +450,12 @@ int cbm_pipeline_pass_definitions(cbm_pipeline_ctx_t *ctx, const cbm_file_info_t
 int cbm_pipeline_pass_k8s(cbm_pipeline_ctx_t *ctx, const cbm_file_info_t *files, int file_count);
 
 int cbm_pipeline_pass_calls(cbm_pipeline_ctx_t *ctx, const cbm_file_info_t *files, int file_count);
+
+/* Cross-file LSP type-aware call resolution pass. Augments per-file
+ * resolved_calls with cross-file resolutions before call edges are emitted.
+ * Implementation: src/pipeline/pass_lsp_cross.c. */
+int cbm_pipeline_pass_lsp_cross(cbm_pipeline_ctx_t *ctx, const cbm_file_info_t *files,
+                                int file_count, CBMFileResult **cache);
 
 /* Sub-passes called from pass_calls: pattern-based edge extraction */
 void cbm_pipeline_pass_fastapi_depends(cbm_pipeline_ctx_t *ctx, const cbm_file_info_t *files,
@@ -336,6 +475,10 @@ typedef struct {
     cbm_change_coupling_t *couplings;
     int count;
     int commit_count;
+    /* Per-file temporal data (change_count + last_modified) for File nodes.
+     * NULL when the history pass had no commits to analyse. */
+    cbm_file_temporal_t *file_temporal;
+    int file_temporal_count;
 } cbm_githistory_result_t;
 
 /* Compute change couplings without touching the graph buffer.
@@ -357,6 +500,12 @@ int cbm_pipeline_pass_similarity(cbm_pipeline_ctx_t *ctx);
 /* Pre-dump pass: SEMANTICALLY_RELATED edges via algorithmic embeddings.
  * Opt-in: only runs when CBM_SEMANTIC_ENABLED=1. */
 int cbm_pipeline_pass_semantic_edges(cbm_pipeline_ctx_t *ctx);
+
+/* Pre-dump pass: interprocedural complexity propagation (Tier B).
+ * Propagates per-function loop_depth along CALLS edges into a transitive
+ * worst-case nested-loop estimate (transitive_loop_depth) and flags call-graph
+ * cycles (recursive). Runs on the graph buffer before the dump. */
+void cbm_pipeline_pass_complexity(cbm_pipeline_ctx_t *ctx);
 
 /* ── Env URL scanner (pass_envscan.c) ────────────────────────────── */
 
@@ -383,5 +532,12 @@ int cbm_pipeline_run_incremental(cbm_pipeline_t *p, const char *db_path, cbm_fil
 /* Pipeline accessors for incremental use */
 const char *cbm_pipeline_repo_path(const cbm_pipeline_t *p);
 atomic_int *cbm_pipeline_cancelled_ptr(cbm_pipeline_t *p);
+
+/* Parse a gRPC stub call "<service-stub>.<method>" into the canonical proto
+ * service name + method. Returns true ONLY when a recognized gRPC stub/client
+ * suffix is present (the stub-type signal that gates Route emission, #294).
+ * Exposed for testing. */
+bool extract_grpc_service_method(const char *callee, char *service, size_t srv_sz, char *method,
+                                 size_t meth_sz);
 
 #endif /* CBM_PIPELINE_INTERNAL_H */

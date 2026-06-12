@@ -58,14 +58,17 @@ jobs:
     uses: ./.github/workflows/_build.yml
 
   # ── Smoke test every binary ────────────────────────────────────
+  # Run unless builds were skipped or a build leg FAILED. Every build leg
+  # (including the macos-15-intel darwin-amd64 binary) is blocking now, so a
+  # failed/missing platform binary correctly stops smoke — see _build.yml.
   smoke:
-    if: ${{ inputs.skip_builds != true && !cancelled() && needs.build.result == 'success' }}
+    if: ${{ inputs.skip_builds != true && !cancelled() && needs.build.result != 'failure' && needs.build.result != 'skipped' }}
     needs: [build]
     uses: ./.github/workflows/_smoke.yml
 
   # ── Soak tests (optional, parallel with smoke) ────────────────
   soak:
-    if: ${{ inputs.soak_level != 'none' && !cancelled() && needs.build.result == 'success' }}
+    if: ${{ inputs.soak_level != 'none' && !cancelled() && needs.build.result != 'failure' && needs.build.result != 'skipped' }}
     needs: [build]
     uses: ./.github/workflows/_soak.yml
     with:
