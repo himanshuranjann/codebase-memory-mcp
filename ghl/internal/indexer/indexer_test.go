@@ -15,9 +15,10 @@ import (
 // ── Fake MCP client ────────────────────────────────────────────
 
 type fakeClient struct {
-	indexCalls   atomic.Int64
-	shouldFail   bool
-	callDuration time.Duration
+	indexCalls     atomic.Int64
+	crossRepoCalls atomic.Int64
+	shouldFail     bool
+	callDuration   time.Duration
 }
 
 func (f *fakeClient) IndexRepository(ctx context.Context, repoPath, mode, projectName string) error {
@@ -31,6 +32,14 @@ func (f *fakeClient) IndexRepository(ctx context.Context, repoPath, mode, projec
 	}
 	if f.shouldFail {
 		return errors.New("fake index error")
+	}
+	return nil
+}
+
+func (f *fakeClient) CrossRepoIntelligence(ctx context.Context, repoPath string, targetProjects []string) error {
+	f.crossRepoCalls.Add(1)
+	if f.shouldFail {
+		return errors.New("fake cross-repo error")
 	}
 	return nil
 }
@@ -94,6 +103,45 @@ func TestIndexer_IndexAll_AllReposIndexed(t *testing.T) {
 	}
 	if cloner.cloneCalls.Load() != 5 {
 		t.Errorf("EnsureClone calls: want 5, got %d", cloner.cloneCalls.Load())
+	}
+}
+
+func TestIndexer_IndexAll_RunsCrossRepoAfterBatch(t *testing.T) {
+	client := &fakeClient{}
+	cloner := &fakeCloner{}
+	repos := sampleRepos(3)
+
+	idx := indexer.New(indexer.Config{
+		Client:      client,
+		Cloner:      cloner,
+		CacheDir:    t.TempDir(),
+		Concurrency: 2,
+	})
+
+	idx.IndexAll(context.Background(), repos, false)
+
+	if client.crossRepoCalls.Load() != 3 {
+		t.Errorf("CrossRepoIntelligence calls: want 3, got %d", client.crossRepoCalls.Load())
+	}
+}
+
+func TestIndexer_IndexAll_SkipsCrossRepoWhenDisabled(t *testing.T) {
+	client := &fakeClient{}
+	cloner := &fakeCloner{}
+	repos := sampleRepos(2)
+
+	idx := indexer.New(indexer.Config{
+		Client:                     client,
+		Cloner:                     cloner,
+		CacheDir:                   t.TempDir(),
+		Concurrency:                1,
+		DisableCrossRepoAfterBatch: true,
+	})
+
+	idx.IndexAll(context.Background(), repos, false)
+
+	if client.crossRepoCalls.Load() != 0 {
+		t.Errorf("CrossRepoIntelligence calls: want 0, got %d", client.crossRepoCalls.Load())
 	}
 }
 
