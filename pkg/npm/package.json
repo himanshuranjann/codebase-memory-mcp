@@ -29,7 +29,7 @@
     "postinstall": "node install.js"
   },
   "engines": {
-    "node": ">=18"
+    "node": ">=22"
   },
   "os": ["linux", "darwin", "win32"],
   "cpu": ["x64", "arm64"],
