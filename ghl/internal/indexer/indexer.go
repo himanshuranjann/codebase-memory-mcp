@@ -19,7 +19,7 @@ type Client interface {
 	IndexRepository(ctx context.Context, repoPath, mode, projectName string) error
 	// CrossRepoIntelligence matches routes/channels from repoPath's project
 	// against targetProjects. Pass ["*"] to scan all indexed projects.
-	CrossRepoIntelligence(ctx context.Context, repoPath string, targetProjects []string) error
+	CrossRepoIntelligence(ctx context.Context, repoPath, projectName string, targetProjects []string) error
 }
 
 // ActivityChecker determines whether a repo has recent activity.
@@ -175,7 +175,11 @@ func (i *Indexer) runCrossRepoPass(ctx context.Context, succeededSlugs []string)
 	targets := []string{"*"}
 	for _, slug := range succeededSlugs {
 		localPath := filepath.Join(i.cfg.CacheDir, slug)
-		if err := i.cfg.Client.CrossRepoIntelligence(ctx, localPath, targets); err != nil {
+		projectName := ""
+		if i.cfg.ProjectNameFunc != nil {
+			projectName = i.cfg.ProjectNameFunc(slug)
+		}
+		if err := i.cfg.Client.CrossRepoIntelligence(ctx, localPath, projectName, targets); err != nil {
 			slog.Warn("cross-repo pass failed", "repo", slug, "err", err)
 		}
 	}

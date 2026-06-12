@@ -153,16 +153,20 @@ func (c *Client) Call(ctx context.Context, method string, params interface{}) (j
 	return c.roundtrip(ctx, method, params)
 }
 
-// CrossRepoIntelligence runs the C binary cross-repo pass for project derived
-// from repoPath, matching routes/channels against targetProjects (use ["*"] for all).
-func (c *Client) CrossRepoIntelligence(ctx context.Context, repoPath string, targetProjects []string) error {
+// CrossRepoIntelligence runs the C binary cross-repo pass for projectName when
+// set, otherwise derived from repoPath. Matches routes/channels against
+// targetProjects (use ["*"] for all).
+func (c *Client) CrossRepoIntelligence(ctx context.Context, repoPath, projectName string, targetProjects []string) error {
 	if len(targetProjects) == 0 {
 		targetProjects = []string{"*"}
 	}
 	args := map[string]interface{}{
-		"repo_path":        repoPath,
-		"mode":             "cross-repo-intelligence",
-		"target_projects":  targetProjects,
+		"repo_path":       repoPath,
+		"mode":            "cross-repo-intelligence",
+		"target_projects": targetProjects,
+	}
+	if projectName != "" {
+		args["project"] = projectName
 	}
 	result, err := c.CallTool(ctx, "index_repository", args)
 	if err != nil {

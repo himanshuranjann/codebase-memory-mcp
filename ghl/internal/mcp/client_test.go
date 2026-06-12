@@ -181,7 +181,7 @@ func TestClient_CrossRepoIntelligence(t *testing.T) {
 	}
 	defer c.Close()
 
-	err = c.CrossRepoIntelligence(ctx, "/tmp/test-repo", []string{"*"})
+	err = c.CrossRepoIntelligence(ctx, "/tmp/test-repo", "", []string{"*"})
 	if err != nil {
 		t.Fatalf("CrossRepoIntelligence: %v", err)
 	}

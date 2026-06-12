@@ -2439,13 +2439,23 @@ static char *get_project_root(cbm_mcp_server_t *srv, const char *project) {
 
 /* Handle mode="cross-repo-intelligence" — extract to reduce complexity. */
 static char *handle_cross_repo_mode(const char *repo_path, const char *args) {
-    char *project = heap_strdup(cbm_project_name_from_path(repo_path));
+    yyjson_doc *jdoc = yyjson_read(args, strlen(args), 0);
+    yyjson_val *jroot = jdoc ? yyjson_doc_get_root(jdoc) : NULL;
+    yyjson_val *project_val = jroot ? yyjson_obj_get(jroot, "project") : NULL;
+    const char *project_override =
+        (project_val && yyjson_is_str(project_val)) ? yyjson_get_str(project_val) : NULL;
+
+    char *project = NULL;
+    if (project_override && project_override[0] != '\0') {
+        project = heap_strdup(project_override);
+    } else {
+        project = heap_strdup(cbm_project_name_from_path(repo_path));
+    }
     if (!project) {
+        yyjson_doc_free(jdoc);
         return cbm_mcp_text_result("cannot derive project name", true);
     }
 
-    yyjson_doc *jdoc = yyjson_read(args, strlen(args), 0);
-    yyjson_val *jroot = jdoc ? yyjson_doc_get_root(jdoc) : NULL;
     yyjson_val *tp_arr = jroot ? yyjson_obj_get(jroot, "target_projects") : NULL;
 
     if (!tp_arr || !yyjson_is_arr(tp_arr) || yyjson_arr_size(tp_arr) == 0) {
@@ -2592,6 +2602,7 @@ static char *handle_index_repository(cbm_mcp_server_t *srv, const char *args) {
         free(mode_str);
         char *result = handle_cross_repo_mode(repo_path, args);
         free(repo_path);
+        free(project_override);
         return result;
     }
 

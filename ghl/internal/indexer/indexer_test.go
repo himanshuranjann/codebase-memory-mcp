@@ -36,7 +36,7 @@ func (f *fakeClient) IndexRepository(ctx context.Context, repoPath, mode, projec
 	return nil
 }
 
-func (f *fakeClient) CrossRepoIntelligence(ctx context.Context, repoPath string, targetProjects []string) error {
+func (f *fakeClient) CrossRepoIntelligence(ctx context.Context, repoPath, projectName string, targetProjects []string) error {
 	f.crossRepoCalls.Add(1)
 	if f.shouldFail {
 		return errors.New("fake cross-repo error")

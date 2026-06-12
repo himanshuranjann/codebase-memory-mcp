@@ -68,6 +68,7 @@ extern void suite_store_checkpoint(void);
 extern void suite_traces(void);
 extern void suite_configlink(void);
 extern void suite_infrascan(void);
+extern void suite_cross_repo(void);
 extern void suite_cli(void);
 extern void suite_system_info(void);
 extern void suite_worker_pool(void);
@@ -195,6 +196,9 @@ int main(void) {
 
     /* Infrastructure scanning */
     RUN_SUITE(infrascan);
+
+    /* Cross-repo route matching */
+    RUN_SUITE(cross_repo);
 
     /* CLI (install, update, config) */
     RUN_SUITE(cli);

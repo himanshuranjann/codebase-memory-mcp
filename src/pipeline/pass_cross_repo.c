@@ -153,13 +153,23 @@ static void lookup_node_info(struct sqlite3 *db, int64_t node_id, char *name_out
 
 /* ── Phase A: HTTP Route matching ────────────────────────────────── */
 
-/* Find a Route node in target_store by QN and return the handler function's
- * node id, name, and file_path via HANDLES edges. Returns 0 if not found. */
-static int64_t find_route_handler(cbm_store_t *target_store, const char *route_qn,
-                                  char *handler_name, size_t name_sz, char *handler_file,
-                                  size_t file_sz) {
+/* Resolve a Route in target_store by QN.
+ *
+ * Returns the Route node id (0 if no Route node with this QN exists), which is
+ * the authoritative cross-repo match: a caller hit a real endpoint in another
+ * project. The handler function is optional enrichment — many indexed routes
+ * have no HANDLES edge (framework/infra registrations). When a HANDLES edge is
+ * present, *handler_id_out plus handler_name/handler_file are filled; otherwise
+ * *handler_id_out is 0 and the name/file buffers are left empty. The match is
+ * NOT gated on the handler existing. */
+static int64_t resolve_route(cbm_store_t *target_store, const char *route_qn,
+                             int64_t *handler_id_out, char *handler_name, size_t name_sz,
+                             char *handler_file, size_t file_sz) {
     handler_name[0] = '\0';
     handler_file[0] = '\0';
+    if (handler_id_out) {
+        *handler_id_out = 0;
+    }
     struct sqlite3 *db = cbm_store_get_db(target_store);
     if (!db) {
         return 0;
@@ -182,20 +192,22 @@ static int64_t find_route_handler(cbm_store_t *target_store, const char *route_q
         return 0;
     }
 
-    /* Follow HANDLES edge to find the handler function */
+    /* Follow HANDLES edge to find the handler function (optional). */
     if (sqlite3_prepare_v2(db,
                            "SELECT n.id, n.name, n.file_path FROM edges e "
                            "JOIN nodes n ON n.id = e.source_id "
                            "WHERE e.target_id = ?1 AND e.type = 'HANDLES' LIMIT 1",
                            CBM_NOT_FOUND, &s, NULL) != SQLITE_OK) {
-        return 0;
+        return route_id;
     }
     sqlite3_bind_int64(s, SKIP_ONE, route_id);
-    int64_t handler_id = 0;
     if (sqlite3_step(s) == SQLITE_ROW) {
-        handler_id = sqlite3_column_int64(s, 0);
+        int64_t handler_id = sqlite3_column_int64(s, 0);
         const char *n = (const char *)sqlite3_column_text(s, SKIP_ONE);
         const char *f = (const char *)sqlite3_column_text(s, PAIR_LEN);
+        if (handler_id_out) {
+            *handler_id_out = handler_id;
+        }
         if (n) {
             snprintf(handler_name, name_sz, "%s", n);
         }
@@ -204,15 +216,20 @@ static int64_t find_route_handler(cbm_store_t *target_store, const char *route_q
         }
     }
     sqlite3_finalize(s);
-    return handler_id;
+    return route_id;
 }
 
-/* Emit CROSS_* edge for a route match: forward into source, reverse into target. */
+/* Emit CROSS_* edges for a route match.
+ *
+ * Forward (caller → local Route in source DB) is ALWAYS written — it is the
+ * authoritative cross-service link a traversal walks. Reverse (handler → Route
+ * in target DB) is only written when a handler function was resolved via a
+ * HANDLES edge; routes without a handler still produce the forward edge. */
 static void emit_cross_route_bidirectional(cbm_store_t *src_store, const char *src_project,
                                            struct sqlite3 *src_db, int64_t caller_id,
                                            int64_t local_route_id, cbm_store_t *tgt_store,
                                            const char *tgt_project, int64_t handler_id,
-                                           const char *route_qn, const char *handler_name,
+                                           int64_t tgt_route_id, const char *handler_name,
                                            const char *handler_file, const char *url_path,
                                            const char *method, const char *edge_type) {
     /* Forward: caller → local Route in source DB */
@@ -221,23 +238,8 @@ static void emit_cross_route_bidirectional(cbm_store_t *src_store, const char *s
                       "url_path", method);
     insert_cross_edge(src_store, src_project, caller_id, local_route_id, edge_type, fwd);
 
-    /* Reverse: handler → Route in target DB */
-    struct sqlite3 *tgt_db = cbm_store_get_db(tgt_store);
-    if (!tgt_db) {
-        return;
-    }
-    sqlite3_stmt *rq = NULL;
-    if (sqlite3_prepare_v2(tgt_db, "SELECT id FROM nodes WHERE qualified_name = ?1 LIMIT 1",
-                           CBM_NOT_FOUND, &rq, NULL) != SQLITE_OK) {
-        return;
-    }
-    sqlite3_bind_text(rq, SKIP_ONE, route_qn, CBM_NOT_FOUND, SQLITE_STATIC);
-    int64_t tgt_route_id = 0;
-    if (sqlite3_step(rq) == SQLITE_ROW) {
-        tgt_route_id = sqlite3_column_int64(rq, 0);
-    }
-    sqlite3_finalize(rq);
-    if (tgt_route_id == 0) {
+    /* Reverse: handler → Route in target DB (only when a handler is known). */
+    if (handler_id == 0 || tgt_route_id == 0) {
         return;
     }
 
@@ -278,7 +280,11 @@ static int match_http_routes(cbm_store_t *src_store, const char *src_project,
         char url_path[CBM_SZ_256] = {0};
         char method[CBM_SZ_32] = {0};
         json_str_prop(props, "url_path", url_path, sizeof(url_path));
-        json_str_prop(props, "method", method, sizeof(method));
+        /* The HTTP verb lives under "method"; older extractions store it as
+         * "callee" (e.g. "Post"). Fall back so method-qualified routes match. */
+        if (!json_str_prop(props, "method", method, sizeof(method))) {
+            json_str_prop(props, "callee", method, sizeof(method));
+        }
         if (!url_path[0]) {
             continue;
         }
@@ -290,22 +296,24 @@ static int match_http_routes(cbm_store_t *src_store, const char *src_project,
 
         char handler_name[CBM_SZ_256] = {0};
         char handler_file[CBM_SZ_512] = {0};
-        int64_t handler_id =
-            find_route_handler(tgt_store, route_qn, handler_name, sizeof(handler_name),
-                               handler_file, sizeof(handler_file));
-        if (handler_id == 0) {
+        int64_t handler_id = 0;
+        int64_t tgt_route_id = resolve_route(tgt_store, route_qn, &handler_id, handler_name,
+                                             sizeof(handler_name), handler_file,
+                                             sizeof(handler_file));
+        if (tgt_route_id == 0) {
             /* Try without method (ANY) */
             snprintf(route_qn, sizeof(route_qn), "__route__ANY__%s", url_path);
-            handler_id = find_route_handler(tgt_store, route_qn, handler_name, sizeof(handler_name),
-                                            handler_file, sizeof(handler_file));
+            tgt_route_id = resolve_route(tgt_store, route_qn, &handler_id, handler_name,
+                                         sizeof(handler_name), handler_file, sizeof(handler_file));
         }
-        if (handler_id == 0) {
+        if (tgt_route_id == 0) {
             continue;
         }
 
         emit_cross_route_bidirectional(src_store, src_project, src_db, caller_id, route_id,
-                                       tgt_store, tgt_project, handler_id, route_qn, handler_name,
-                                       handler_file, url_path, method, "CROSS_HTTP_CALLS");
+                                       tgt_store, tgt_project, handler_id, tgt_route_id,
+                                       handler_name, handler_file, url_path, method,
+                                       "CROSS_HTTP_CALLS");
 
         count++;
     }
@@ -351,10 +359,11 @@ static int match_async_routes(cbm_store_t *src_store, const char *src_project,
 
         char handler_name[CBM_SZ_256] = {0};
         char handler_file[CBM_SZ_512] = {0};
-        int64_t handler_id =
-            find_route_handler(tgt_store, route_qn, handler_name, sizeof(handler_name),
-                               handler_file, sizeof(handler_file));
-        if (handler_id == 0) {
+        int64_t handler_id = 0;
+        int64_t tgt_route_id = resolve_route(tgt_store, route_qn, &handler_id, handler_name,
+                                             sizeof(handler_name), handler_file,
+                                             sizeof(handler_file));
+        if (tgt_route_id == 0) {
             continue;
         }
 
@@ -532,16 +541,18 @@ static int match_typed_routes(cbm_store_t *src_store, const char *src_project,
 
         char handler_name[CBM_SZ_256] = {0};
         char handler_file[CBM_SZ_512] = {0};
-        int64_t handler_id =
-            find_route_handler(tgt_store, route_qn, handler_name, sizeof(handler_name),
-                               handler_file, sizeof(handler_file));
-        if (handler_id == 0) {
+        int64_t handler_id = 0;
+        int64_t tgt_route_id = resolve_route(tgt_store, route_qn, &handler_id, handler_name,
+                                             sizeof(handler_name), handler_file,
+                                             sizeof(handler_file));
+        if (tgt_route_id == 0) {
             continue;
         }
 
         emit_cross_route_bidirectional(src_store, src_project, src_db, caller_id, route_id,
-                                       tgt_store, tgt_project, handler_id, route_qn, handler_name,
-                                       handler_file, svc_val, svc_key, cross_edge_type);
+                                       tgt_store, tgt_project, handler_id, tgt_route_id,
+                                       handler_name, handler_file, svc_val, svc_key,
+                                       cross_edge_type);
         count++;
     }
     sqlite3_finalize(s);
