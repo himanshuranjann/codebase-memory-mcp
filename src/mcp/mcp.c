@@ -2617,16 +2617,17 @@ static char *handle_index_repository(cbm_mcp_server_t *srv, const char *args) {
     bool persistence = cbm_mcp_get_bool_arg(args, "persistence");
 
     cbm_pipeline_t *p = cbm_pipeline_new(repo_path, NULL, mode);
+    if (!p) {
+        free(repo_path);
+        free(project_override);
+        return cbm_mcp_text_result("failed to create pipeline", true);
+    }
     /* Override the project name if provided — ensures .db filename matches
      * what the Go persist function expects (e.g. data-fleet-cache-repos-X). */
     if (project_override && project_override[0] != '\0') {
         cbm_pipeline_set_project_name(p, project_override);
     }
     free(project_override);
-    if (!p) {
-        free(repo_path);
-        return cbm_mcp_text_result("failed to create pipeline", true);
-    }
     cbm_pipeline_set_persistence(p, persistence);
 
     char *project_name = heap_strdup(cbm_pipeline_project_name(p));

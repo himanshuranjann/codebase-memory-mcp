@@ -9,26 +9,71 @@
  * handler is optional enrichment used only for the reverse edge.
  */
 #include "test_framework.h"
+#include "../src/foundation/compat.h"
 #include <pipeline/pass_cross_repo.h>
 #include <store/store.h>
 #include <foundation/platform.h>
 
+#include <dirent.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
 
+static char xr_dir[256];
+static char xr_saved_cache_dir[512];
+static bool xr_had_cache_dir;
+
+static void xr_remove_dir_tree(const char *dir) {
+    DIR *d = opendir(dir);
+    if (!d) {
+        return;
+    }
+    struct dirent *ent;
+    char path[512];
+    while ((ent = readdir(d)) != NULL) {
+        if (strcmp(ent->d_name, ".") == 0 || strcmp(ent->d_name, "..") == 0) {
+            continue;
+        }
+        snprintf(path, sizeof(path), "%s/%s", dir, ent->d_name);
+        unlink(path);
+    }
+    closedir(d);
+    rmdir(dir);
+}
+
 /* Point the cache dir (where cbm_cross_repo_match looks up <project>.db) at a
  * fresh temp directory. Returns the dir path in a static buffer. */
-static char xr_dir[256];
 static const char *xr_setup_cache_dir(void) {
+    const char *prev = getenv("CBM_CACHE_DIR");
+    xr_had_cache_dir = prev != NULL;
+    if (prev) {
+        snprintf(xr_saved_cache_dir, sizeof(xr_saved_cache_dir), "%s", prev);
+    } else {
+        xr_saved_cache_dir[0] = '\0';
+    }
+
     snprintf(xr_dir, sizeof(xr_dir), "/tmp/cbm_xrepo_XXXXXX");
     char *made = mkdtemp(xr_dir);
     if (!made) {
         return NULL;
     }
-    setenv("CBM_CACHE_DIR", xr_dir, 1);
+    cbm_setenv("CBM_CACHE_DIR", xr_dir, 1);
     return xr_dir;
+}
+
+static void xr_teardown_cache_dir(void) {
+    if (xr_dir[0] != '\0') {
+        xr_remove_dir_tree(xr_dir);
+        xr_dir[0] = '\0';
+    }
+    if (xr_had_cache_dir) {
+        cbm_setenv("CBM_CACHE_DIR", xr_saved_cache_dir, 1);
+    } else {
+        cbm_unsetenv("CBM_CACHE_DIR");
+    }
+    xr_had_cache_dir = false;
+    xr_saved_cache_dir[0] = '\0';
 }
 
 static void xr_db_path(const char *project, char *buf, size_t bufsz) {
@@ -66,6 +111,35 @@ static void xr_make_source(const char *project, const char *call_props) {
     cbm_store_close(s);
 }
 
+static void xr_make_async_source(const char *project, const char *call_props) {
+    char path[512];
+    xr_db_path(project, path, sizeof(path));
+    cbm_store_t *s = cbm_store_open_path(path);
+    cbm_store_upsert_project(s, project, "/tmp/src");
+
+    cbm_node_t caller = {.project = project,
+                         .label = "Function",
+                         .name = "publishEvent",
+                         .qualified_name = "src.publishEvent",
+                         .file_path = "src/publisher.ts"};
+    int64_t caller_id = cbm_store_upsert_node(s, &caller);
+
+    cbm_node_t local_route = {.project = project,
+                              .label = "Route",
+                              .name = "async-call",
+                              .qualified_name = "src.async-call",
+                              .file_path = "src/publisher.ts"};
+    int64_t route_id = cbm_store_upsert_node(s, &local_route);
+
+    cbm_edge_t e = {.project = project,
+                    .source_id = caller_id,
+                    .target_id = route_id,
+                    .type = "ASYNC_CALLS",
+                    .properties_json = call_props};
+    cbm_store_insert_edge(s, &e);
+    cbm_store_close(s);
+}
+
 /* Create a target project hosting a Route with the given QN. When
  * with_handler is true, also add a handler Function and a HANDLES edge. */
 static void xr_make_target(const char *project, const char *route_qn, bool with_handler) {
@@ -97,19 +171,26 @@ static void xr_make_target(const char *project, const char *route_qn, bool with_
     cbm_store_close(s);
 }
 
-/* Count CROSS_HTTP_CALLS edges in a project's DB. */
-static int xr_count_cross(const char *project) {
+static int xr_count_cross_type(const char *project, const char *edge_type) {
     char path[512];
     xr_db_path(project, path, sizeof(path));
     cbm_store_t *s = cbm_store_open_path(path);
     cbm_edge_t *edges = NULL;
     int count = 0;
-    cbm_store_find_edges_by_type(s, project, "CROSS_HTTP_CALLS", &edges, &count);
+    cbm_store_find_edges_by_type(s, project, edge_type, &edges, &count);
     if (edges) {
         cbm_store_free_edges(edges, count);
     }
     cbm_store_close(s);
     return count;
+}
+
+static int xr_count_cross(const char *project) {
+    return xr_count_cross_type(project, "CROSS_HTTP_CALLS");
+}
+
+static int xr_count_cross_async(const char *project) {
+    return xr_count_cross_type(project, "CROSS_ASYNC_CALLS");
 }
 
 /* A Route match with NO handler must still produce a forward CROSS_HTTP_CALLS
@@ -125,6 +206,7 @@ TEST(cross_repo_http_match_without_handler) {
     ASSERT_EQ(r.http_edges, 1);
     ASSERT_EQ(xr_count_cross("xsrc"), 1); /* forward edge written */
     ASSERT_EQ(xr_count_cross("xtgt"), 0); /* no reverse without a handler */
+    xr_teardown_cache_dir();
     return 0;
 }
 
@@ -140,6 +222,7 @@ TEST(cross_repo_http_reverse_with_handler) {
     ASSERT_EQ(r.http_edges, 1);
     ASSERT_EQ(xr_count_cross("xsrc"), 1);
     ASSERT_EQ(xr_count_cross("xtgt"), 1); /* reverse edge written */
+    xr_teardown_cache_dir();
     return 0;
 }
 
@@ -155,6 +238,7 @@ TEST(cross_repo_method_via_callee) {
 
     ASSERT_EQ(r.http_edges, 1);
     ASSERT_EQ(xr_count_cross("xsrc"), 1);
+    xr_teardown_cache_dir();
     return 0;
 }
 
@@ -169,6 +253,23 @@ TEST(cross_repo_no_route_no_match) {
 
     ASSERT_EQ(r.http_edges, 0);
     ASSERT_EQ(xr_count_cross("xsrc"), 0);
+    xr_teardown_cache_dir();
+    return 0;
+}
+
+/* ASYNC_CALLS with a target Route and no HANDLES must still match. */
+TEST(cross_repo_async_match_without_handler) {
+    ASSERT_NOT_NULL(xr_setup_cache_dir());
+    xr_make_async_source("xasrc", "{\"url_path\":\"/events/order-created\"}");
+    xr_make_target("xatgt", "__route__async__/events/order-created", false);
+
+    const char *targets[] = {"xatgt"};
+    cbm_cross_repo_result_t r = cbm_cross_repo_match("xasrc", targets, 1);
+
+    ASSERT_EQ(r.async_edges, 1);
+    ASSERT_EQ(xr_count_cross_async("xasrc"), 1);
+    ASSERT_EQ(xr_count_cross_async("xatgt"), 0);
+    xr_teardown_cache_dir();
     return 0;
 }
 
@@ -177,4 +278,5 @@ void suite_cross_repo(void) {
     RUN_TEST(cross_repo_http_reverse_with_handler);
     RUN_TEST(cross_repo_method_via_callee);
     RUN_TEST(cross_repo_no_route_no_match);
+    RUN_TEST(cross_repo_async_match_without_handler);
 }
